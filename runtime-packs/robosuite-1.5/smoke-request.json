@@ -1,0 +1,8 @@
+{
+  "request_id": "runtime-pack-robosuite-smoke",
+  "runtime_profile_id": "robosuite-1.5",
+  "layout": "default",
+  "seed": 7,
+  "headless": true,
+  "render_backend": "egl"
+}

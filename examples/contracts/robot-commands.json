@@ -1,0 +1,67 @@
+[
+  {
+    "command_id": "base-001",
+    "scene_generation": 1,
+    "type": "base_trajectory",
+    "timeout_seconds": 10,
+    "base_trajectory": {
+      "frame_id": "world",
+      "points": [
+        {
+          "time_from_start_seconds": 0,
+          "positions": {
+            "x": 0,
+            "y": 0,
+            "yaw": 0
+          }
+        },
+        {
+          "time_from_start_seconds": 2,
+          "positions": {
+            "x": 1,
+            "y": 0,
+            "yaw": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "command_id": "joint-001",
+    "scene_generation": 1,
+    "type": "joint_trajectory",
+    "timeout_seconds": 10,
+    "joint_trajectory": {
+      "resources": ["left_arm"],
+      "frame_id": "r1pro/base",
+      "points": [
+        {
+          "time_from_start_seconds": 0,
+          "positions": {
+            "left_arm_joint1": 0
+          }
+        },
+        {
+          "time_from_start_seconds": 1,
+          "positions": {
+            "left_arm_joint1": 0.3
+          },
+          "velocities": {
+            "left_arm_joint1": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "command_id": "gripper-001",
+    "scene_generation": 1,
+    "type": "gripper_command",
+    "timeout_seconds": 5,
+    "gripper_command": {
+      "gripper_id": "left",
+      "position": 0.02,
+      "max_effort": 20
+    }
+  }
+]

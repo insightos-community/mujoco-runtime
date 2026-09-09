@@ -1,0 +1,9 @@
+{
+  "request_id": "start-example-001",
+  "runtime_profile_id": "native-mujoco",
+  "runtime_bundle_id": "depalletizing-v1",
+  "layout": "layout001",
+  "seed": 7,
+  "headless": true,
+  "render_backend": "egl"
+}

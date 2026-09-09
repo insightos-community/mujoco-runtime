@@ -1,0 +1,8 @@
+version: 1
+sources:
+  libero:
+    url: https://github.com/Lifelong-Robot-Learning/LIBERO.git
+    commit: 8f1084e3132a39270c3a13ebe37270a43ece2a01
+  libero_pro:
+    url: https://github.com/RLinf/LIBERO-PRO.git
+    commit: 0bcf73621c789ffd6ed8858467a89df9ca94fd6b

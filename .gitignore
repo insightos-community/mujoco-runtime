@@ -1,0 +1,40 @@
+# 构建产物（Cython/PyInstaller/Docker 导出物一律不入库）
+*.c
+*.so
+*.tar
+dist/
+dist-runtime-packs/
+build/
+.output/
+
+# 运行时产物
+*.log
+*.TXT
+*.xauth
+
+# CI 本机下载的扫描工具
+.ci-bin/
+.cache/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+coverage.*
+coverage.xml
+.ruff_cache/
+.venv/
+*.egg-info/
+
+# Profile 隔离环境和演示证据
+profiles/**/.venv/
+.output/profiles/
+
+# 前端子工程
+web-viewer/node_modules/
+web-viewer/dist/
+
+# 补丁和冲突残留
+*.orig
+*.rej

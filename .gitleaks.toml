@@ -1,0 +1,16 @@
+# 沿用默认规则。白名单必须挂在 generic-api-key 上，全局 allowlists
+# 在 useDefault 时不会合并，扫历史提交也不生效。
+title = "semantic-plugin-mujoco"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "产品场景标识，不是密钥"
+regexTarget = "secret"
+regexes = [
+  '''palletizing_depalletizing_''',
+]

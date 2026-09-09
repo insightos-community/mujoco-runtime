@@ -1,0 +1,37 @@
+schema_version: 1
+catalog_version: 0.4.0
+entries:
+  - scene_id: robosuite-lift
+    name: robosuite Lift
+    description: robosuite 1.5 官方只读 Lift 环境
+    tags: [robosuite, benchmark, franka]
+    engine: mujoco
+    loader: robosuite
+    source: robosuite
+    compatible_runtime_profile: robosuite-1.5
+    versions:
+      - version: 1.5.0
+        runtime_scene_key: Lift
+        published: true
+        robot_models: [franka_panda]
+        variants: [{variant_id: default, name: 默认环境, kind: environment_config}]
+        capabilities: [viewer, rgb, depth, contact, evaluation]
+        authoring: {mode: none}
+        evaluation: {provider: robosuite, evaluation_kind: native_success, metrics: [reward, success], supports_comparison: false}
+  - scene_id: robosuite-stack
+    name: robosuite Stack
+    description: robosuite 1.5 官方只读 Stack 环境
+    tags: [robosuite, benchmark, franka]
+    engine: mujoco
+    loader: robosuite
+    source: robosuite
+    compatible_runtime_profile: robosuite-1.5
+    versions:
+      - version: 1.5.0
+        runtime_scene_key: Stack
+        published: true
+        robot_models: [franka_panda]
+        variants: [{variant_id: default, name: 默认环境, kind: environment_config}]
+        capabilities: [viewer, rgb, depth, contact, evaluation]
+        authoring: {mode: none}
+        evaluation: {provider: robosuite, evaluation_kind: native_success, metrics: [reward, success], supports_comparison: false}

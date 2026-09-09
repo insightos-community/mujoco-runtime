@@ -1,0 +1,15 @@
+# 路径相对于 LIBERO-Pro 仓库根目录。
+ood_task_configs:
+  environment: libero_ood/ood_environment.yaml
+  swap: libero_ood/ood_spatial_relation.yaml
+  object: libero_ood/ood_object.yaml
+  language: libero_ood/ood_language.yaml
+  task: libero_ood/ood_task.yaml
+
+# 第一轮验收只启用一种明确扰动，避免同时变化导致结果无法解释。
+selected_perturbations:
+  - environment
+
+metadata:
+  name: semantic-v040-libero-pro-baseline
+  description: 固定 LIBERO task/init-state 上的基础环境与扰动环境对比

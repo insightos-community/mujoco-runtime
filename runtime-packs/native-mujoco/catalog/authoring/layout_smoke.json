@@ -1,0 +1,34 @@
+{
+  "id": "public-layout-smoke",
+  "project_id": "public",
+  "scene_id": "depalletizing-r1pro",
+  "layout_id": "layout_smoke",
+  "layout_name": "单箱物理调试",
+  "name": "R1 Pro 拆码垛 · 单箱物理调试",
+  "description": "一个大号周转箱、双侧夹具 Robot、来源/目标托盘和四个目标槽位，用于观察真实抓取、搬运与放置。",
+  "scene_kind": "scene_document",
+  "revision": 1,
+  "status": "published",
+  "version": 1,
+  "assets": [
+    {"id": "robot-r1-pro-tote-v1", "asset_key": "robot/r1_pro_tote_gripper/config/r1_pro_tote_gripper.xml", "kind": "robot", "metadata": {"model": "r1_pro_chassis", "tool_profile": "tote_clamp"}},
+    {"id": "object-tote-large-v1", "asset_key": "assets/objects/tote_600x400x340.xml", "kind": "object", "metadata": {"model": "tote_600x400x340", "category": "tote"}},
+    {"id": "object-pallet-v1", "asset_key": "assets/objects/box.xml", "kind": "object", "metadata": {"model": "box", "category": "pallet"}},
+    {"id": "object-target-v1", "asset_key": "assets/objects/target.xml", "kind": "object", "metadata": {"model": "target", "category": "region"}}
+  ],
+  "nodes": [
+    {"id": "robot-r1-pro", "name": "R1 Pro Tote", "kind": "robot", "asset_id": "robot-r1-pro-tote-v1", "transform": {"position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 1], "scale": [1, 1, 1]}, "properties": {"model": "r1_pro_chassis", "robot_id": "r1_pro_tote_gripper-1", "sensor_names": ["camera.rgb", "camera.depth"]}},
+    {"id": "pallet-a", "name": "Pallet A", "kind": "object", "asset_id": "object-pallet-v1", "transform": {"position": [0, 1.5, 0.075], "quaternion_xyzw": [0, 0, 0, 1], "scale": [1, 1, 1]}, "properties": {"model": "box", "category": "pallet", "size": [1.2, 1.0, 0.15], "static": true, "interactive": false}},
+    {"id": "pallet-b", "name": "Pallet B", "kind": "object", "asset_id": "object-pallet-v1", "transform": {"position": [1.5, 1.5, 0.075], "quaternion_xyzw": [0, 0, 0, 1], "scale": [1, 1, 1]}, "properties": {"model": "box", "category": "pallet", "size": [1.2, 1.0, 0.15], "static": true, "interactive": false}},
+    {"id": "tote-large-smoke", "name": "Tote Large Smoke", "kind": "object", "asset_id": "object-tote-large-v1", "transform": {"position": [0, 1.5, 0.152], "quaternion_xyzw": [0, 0, 0, 1], "scale": [1, 1, 1]}, "properties": {"model": "tote_600x400x340", "category": "tote", "size": [0.6, 0.4, 0.34], "static": false, "interactive": true}}
+  ],
+  "regions": [
+    {"id": "pallet-a-approach", "name": "Pallet A Approach", "kind": "region", "pose": {"position": [0, 0.5, 0.02], "quaternion_xyzw": [0, 0, 0.7071068, 0.7071068]}, "extent": [1.2, 0.5, 0.02]},
+    {"id": "pallet-b-approach", "name": "Pallet B Approach", "kind": "region", "pose": {"position": [1.5, 0.5, 0.02], "quaternion_xyzw": [0, 0, 0.7071068, 0.7071068]}, "extent": [1.2, 0.5, 0.02]},
+    {"id": "pallet-b-slot-r1-c1", "name": "Pallet B R1 C1", "kind": "slot", "pose": {"position": [1.19, 1.29, 0.16], "quaternion_xyzw": [0, 0, 0, 1]}, "extent": [0.56, 0.36, 0.02]},
+    {"id": "pallet-b-slot-r1-c2", "name": "Pallet B R1 C2", "kind": "slot", "pose": {"position": [1.81, 1.29, 0.16], "quaternion_xyzw": [0, 0, 0, 1]}, "extent": [0.56, 0.36, 0.02]},
+    {"id": "pallet-b-slot-r2-c1", "name": "Pallet B R2 C1", "kind": "slot", "pose": {"position": [1.19, 1.71, 0.16], "quaternion_xyzw": [0, 0, 0, 1]}, "extent": [0.56, 0.36, 0.02]},
+    {"id": "pallet-b-slot-r2-c2", "name": "Pallet B R2 C2", "kind": "slot", "pose": {"position": [1.81, 1.71, 0.16], "quaternion_xyzw": [0, 0, 0, 1]}, "extent": [0.56, 0.36, 0.02]}
+  ],
+  "physics": {"gravity_m_s2": [0, 0, -9.81], "timestep_seconds": 0.001}
+}

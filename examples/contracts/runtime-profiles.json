@@ -1,0 +1,96 @@
+[
+  {
+    "runtime_profile_id": "native-mujoco",
+    "name": "Native MuJoCo",
+    "engine": "mujoco",
+    "loader": "native",
+    "api_version": "v1",
+    "scene_kinds": [
+      "scene_document",
+      "asset_scene"
+    ],
+    "environment": "project",
+    "environment_ready": true,
+    "available": true,
+    "unavailable_reason": null,
+    "capabilities": {
+      "editable_scene": true,
+      "native_evaluator": false,
+      "viewer": true,
+      "viewer_camera_modes": ["free", "fixed"],
+      "scene_step": true,
+      "scene_reset": true,
+      "robot_models": [
+        "r1_pro_chassis"
+      ],
+      "sensor_kinds": [
+        "rgb",
+        "depth",
+        "contact"
+      ]
+    }
+  },
+  {
+    "runtime_profile_id": "robosuite-1.5",
+    "name": "robosuite 1.5",
+    "engine": "mujoco",
+    "loader": "robosuite",
+    "api_version": "v1",
+    "scene_kinds": [
+      "robosuite-task"
+    ],
+    "environment": "profiles/robosuite",
+    "environment_ready": false,
+    "available": false,
+    "unavailable_reason": "隔离环境未就绪",
+    "capabilities": {
+      "editable_scene": false,
+      "native_evaluator": true,
+      "viewer": true,
+      "viewer_camera_modes": ["fixed"],
+      "scene_step": true,
+      "scene_reset": true,
+      "robot_models": [
+        "Panda",
+        "Franka"
+      ],
+      "sensor_kinds": [
+        "rgb",
+        "depth",
+        "contact"
+      ]
+    }
+  },
+  {
+    "runtime_profile_id": "libero-robosuite-1.4",
+    "name": "LIBERO / LIBERO-Pro",
+    "engine": "mujoco",
+    "loader": "libero",
+    "api_version": "v1",
+    "scene_kinds": [
+      "libero-task",
+      "libero-pro-evaluation"
+    ],
+    "environment": "profiles/libero",
+    "environment_ready": false,
+    "available": false,
+    "unavailable_reason": "隔离环境未就绪",
+    "capabilities": {
+      "editable_scene": false,
+      "native_evaluator": true,
+      "viewer": true,
+      "viewer_camera_modes": ["fixed"],
+      "scene_step": true,
+      "scene_reset": true,
+      "robot_models": [
+        "Panda",
+        "Franka"
+      ],
+      "sensor_kinds": [
+        "rgb",
+        "depth",
+        "contact"
+      ]
+    }
+  }
+]

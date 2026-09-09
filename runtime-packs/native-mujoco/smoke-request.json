@@ -1,0 +1,8 @@
+{
+  "request_id": "runtime-pack-native-smoke",
+  "runtime_profile_id": "native-mujoco",
+  "layout": "layout001",
+  "seed": 7,
+  "headless": true,
+  "render_backend": "egl"
+}

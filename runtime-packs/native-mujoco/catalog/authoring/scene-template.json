@@ -1,0 +1,9 @@
+{
+  "id":"public-template-depalletizing-r1pro","project_id":"public","scene_id":"depalletizing-r1pro","layout_id":"template","layout_name":"空白 Layout","name":"R1 Pro 拆码垛模板","description":"保留 R1 Pro、固定预览相机和灯光；用户从兼容素材目录组织 Layout。","category":"public-template","tags":["native","depalletizing","r1pro"],"scene_kind":"scene_document","revision":1,"status":"published","version":1,
+  "assets":[{"id":"robot-r1-pro-chassis-v1","asset_key":"robot/r1_pro_chassis/config/r1_pro_chassis.xml","kind":"robot","metadata":{"model":"r1_pro_chassis"}}],
+  "nodes":[
+    {"id":"robot-r1-pro","name":"R1 Pro","kind":"robot","asset_id":"robot-r1-pro-chassis-v1","transform":{"position":[0,0,0.01],"quaternion_xyzw":[0,0,0,1],"scale":[1,1,1]},"properties":{"model":"r1_pro_chassis","robot_id":"r1_pro_chassis-1","sensor_names":["camera.rgb","camera.depth"]}},
+    {"id":"camera-overview","name":"Overview Camera","kind":"camera","transform":{"position":[4,-5,3.5],"quaternion_xyzw":[0,0,0,1],"scale":[1,1,1]},"properties":{"sensor_kind":"rgb","width":1280,"height":720,"fps":20,"fovy":45}},
+    {"id":"light-key","name":"Key Light","kind":"light","transform":{"position":[0,0,5],"quaternion_xyzw":[0,0,0,1],"scale":[1,1,1]},"properties":{"direction":[0,0,-1],"diffuse":[0.9,0.9,0.9],"specular":[0.3,0.3,0.3],"castshadow":true,"active":true}}
+  ],"regions":[],"physics":{"gravity_m_s2":[0,0,-9.81],"timestep_seconds":0.001}
+}

@@ -1,0 +1,30 @@
+schema_version: 1
+catalog_version: 0.4.0
+entries:
+  - scene_id: depalletizing-r1pro
+    name: R1 Pro 拆码垛
+    description: 原生 MuJoCo 双臂移动机器人拆码垛公共模板
+    tags: [native, depalletizing, r1pro]
+    engine: mujoco
+    loader: native
+    source: mujoco_asset
+    compatible_runtime_profile: native-mujoco
+    preview: /simulation-previews/depalletizing-r1pro.svg
+    versions:
+      - version: 1.0.0
+        runtime_scene_key: palletizing_depalletizing_tote_v1
+        published: true
+        robot_models: [r1_pro_chassis]
+        variants:
+          - {variant_id: layout001, name: 布局 001, kind: layout, preview: /simulation-previews/depalletizing-r1pro-layout001.svg, authoring_ref: authoring/layout001.json}
+          - {variant_id: layout002, name: 布局 002, kind: layout, preview: /simulation-previews/depalletizing-r1pro-layout002.svg, authoring_ref: authoring/layout002.json}
+          - {variant_id: layout003, name: 布局 003, kind: layout, preview: /simulation-previews/depalletizing-r1pro-layout003.svg, authoring_ref: authoring/layout003.json}
+          - {variant_id: layout_smoke, name: 单箱物理调试, kind: layout, preview: /simulation-previews/depalletizing-r1pro.svg, authoring_ref: authoring/layout_smoke.json}
+        capabilities: [viewer, rgb, depth, contact, holding, tool_state, semantic_snapshot]
+        authoring:
+          mode: layout_only
+          template_ref: authoring/scene-template.json
+          asset_catalog_version: 0.4.0
+          allowed_asset_tags: [native-mujoco]
+          locked_nodes: [robot-r1-pro, camera-overview, light-key]
+          preview_camera: {projection: top_down, look_at: [0, 0, 0], distance: 10}

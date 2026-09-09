@@ -1,0 +1,9 @@
+Semantic MuJoCo Runtime Pack - distribution notice
+
+This repository does not currently contain an approved public product-license grant.
+Runtime Packs produced from it are for authorized internal deployment only until the
+repository owner adds the applicable product license. Third-party packages remain
+subject to the license metadata carried by their Wheels and the generated version file.
+
+This notice does not grant rights to MuJoCo assets, R1 Pro models, Franka models,
+LIBERO, LIBERO-Pro, robosuite datasets, or any other externally mounted content.

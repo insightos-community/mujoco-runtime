@@ -1,0 +1,17 @@
+{
+  "scene_key": "libero_spatial:0",
+  "instance_id": "example-libero-instance",
+  "generation": 1,
+  "runtime_profile_id": "libero-robosuite-1.4",
+  "reward": 0.0,
+  "success": false,
+  "terminated": false,
+  "language": "pick up the black bowl and place it on the plate",
+  "metrics": {
+    "package": "libero",
+    "suite": "libero_spatial",
+    "task_id": 0,
+    "init_state_id": 0
+  },
+  "observed_at": "2026-08-09T00:00:00Z"
+}

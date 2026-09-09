@@ -1,0 +1,53 @@
+{
+  "runtime_bundle_id": "depalletizing-v1",
+  "document_id": "scene-doc-example",
+  "revision": 2,
+  "scene_version": 1,
+  "scene_key": "studio-depalletizing",
+  "runtime_profile_id": "native-mujoco",
+  "document": {
+    "id": "scene-doc-example",
+    "name": "Example",
+    "scene_kind": "scene_document",
+    "assets": [],
+    "nodes": [
+      {
+        "id": "r1pro-1",
+        "name": "R1 Pro",
+        "kind": "robot",
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "quaternion_xyzw": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "properties": {
+          "model": "r1_pro_chassis"
+        },
+        "extensions": {}
+      }
+    ],
+    "regions": [],
+    "physics": {
+      "timestep_seconds": 0.002
+    },
+    "extensions": {}
+  },
+  "validation": {
+    "valid": true,
+    "issues": []
+  },
+  "created_at": "2026-08-09T00:00:00Z"
+}
