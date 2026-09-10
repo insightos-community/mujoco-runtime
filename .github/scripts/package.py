@@ -21,7 +21,7 @@ for p in (root/'dist').glob('*'):
  if p.suffix=='.whl':
   with zipfile.ZipFile(p) as z:
    if z.testzip():raise SystemExit('Corrupt wheel')
- if p.is_file():shutil.copy2(p,out/p.name)
+ if p.is_file() and (p.suffix=='.whl' or p.name.endswith('.tar.gz')):shutil.copy2(p,out/p.name)
 for p in payload.rglob('*'):
  if p.is_symlink():raise SystemExit(f'Unexpected symlink: {p}')
  if p.is_file():
