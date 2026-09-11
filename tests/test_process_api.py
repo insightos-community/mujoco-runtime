@@ -73,7 +73,8 @@ def test_process_sigterm_and_port_conflict(asset_root):
             text=True,
         )
         assert second.wait(timeout=5) != 0
-        assert "address already in use" in (second.stdout.read() or "").lower()
+        output = (second.stdout.read() or "").lower()
+        assert "address already in use" in output or "address in use" in output
     finally:
         process.terminate()
         assert process.wait(timeout=5) in {0, -15}
