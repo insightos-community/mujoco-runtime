@@ -31,6 +31,18 @@ jobs:
           uv run --frozen pytest -p pytest_cov -m 'not native' --cov=plugin_mujoco --cov-report=term-missing --cov-report=xml
       - name: Exercise native physics and CGL rendering
         run: uv run --frozen python tools/macos_smoke.py --output .output/macos-report.json
+      - name: Check out pinned simulation assets
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: insightos-community/mujoco-asset
+          ref: f9855e6dd1419f890b418a9f398bd1d5ec49b57c
+          path: .macos-assets
+          lfs: true
+          persist-credentials: false
+      - name: Run the real pallet scene on native macOS
+        env:
+          MUJOCO_ASSET_ROOT: ${{ github.workspace }}/.macos-assets
+        run: uv run --frozen pytest tests/test_native_smoke.py -vv
       - name: Build Python packages
         run: |
           uv build
