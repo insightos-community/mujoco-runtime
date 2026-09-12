@@ -12,6 +12,7 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--physics-only", action="store_true", help="Do not qualify graphics on runners without CGL")
     args = parser.parse_args()
     report = {"system": platform.system(), "machine": platform.machine(), "python": sys.version,
               "physics": "not-run", "rendering": "not-run"}
@@ -34,6 +35,9 @@ def main() -> None:
             mujoco.mj_step(model, data)
         assert np.isfinite(data.qpos).all() and data.qpos[2] < 1
         report["physics"] = "passed"
+        if args.physics_only:
+            report["rendering"] = "not-tested: physical Mac qualification required"
+            return
         with mujoco.Renderer(model, height=120, width=160) as renderer:
             renderer.update_scene(data)
             pixels = renderer.render()
