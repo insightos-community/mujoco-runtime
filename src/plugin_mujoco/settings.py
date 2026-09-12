@@ -18,8 +18,14 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import platform
+from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def default_render_backend() -> str:
+    """Select the native offscreen backend without importing MuJoCo."""
+    return {"Darwin": "cgl", "Windows": "glfw"}.get(platform.system(), "egl")
 
 
 @dataclass(frozen=True)
@@ -27,7 +33,7 @@ class Settings:
     asset_root: Path
     host: str = "127.0.0.1"
     port: int = 8090
-    render_backend: str = "egl"
+    render_backend: str = field(default_factory=default_render_backend)
     backend: str = "mujoco"
     realtime: bool = False
     authoring_root: Path | None = None
@@ -54,7 +60,7 @@ class Settings:
             asset_root=asset_root,
             host=os.getenv("PLUGIN_MUJOCO_HOST", "127.0.0.1"),
             port=int(os.getenv("PLUGIN_MUJOCO_PORT", "8090")),
-            render_backend=os.getenv("MUJOCO_GL", "egl").lower(),
+            render_backend=os.getenv("MUJOCO_GL", default_render_backend()).lower(),
             backend=os.getenv("PLUGIN_MUJOCO_BACKEND", "mujoco").lower(),
             # 进程入口服务于Web、Pilot和真机等价的实时控制，默认必须给HTTP、
             # 传感与命令线程留出调度窗口。离线批处理仍可显式设置为0，或在
