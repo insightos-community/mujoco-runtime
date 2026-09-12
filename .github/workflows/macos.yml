@@ -1,0 +1,48 @@
+name: Native macOS
+on:
+  pull_request:
+  push:
+    branches: [main, feat/macos-native]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      MUJOCO_GL: cgl
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: 0.12.12
+          enable-cache: true
+      - name: Verify native architecture and install locked environment
+        run: |
+          test "$(uname -m)" = arm64
+          uv sync --frozen --python 3.13.15 --extra dev
+      - name: Test API and platform defaults
+        run: |
+          uv run --frozen ruff check src/plugin_mujoco/settings.py src/plugin_mujoco/models.py tests/test_settings.py tests/test_native_smoke.py
+          uv run --frozen pytest -p pytest_cov -m 'not native' --cov=plugin_mujoco --cov-report=term-missing --cov-report=xml
+      - name: Exercise native physics and CGL rendering
+        run: uv run --frozen python tools/macos_smoke.py --output .output/macos-report.json
+      - name: Build Python packages
+        run: |
+          uv build
+          uv build --project packages/mujoco-visuals --out-dir dist
+      - name: Upload packages and native validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mujoco-runtime-macos-arm64
+          path: |
+            dist/*
+            .output/macos-report.json
+            coverage.xml
+          if-no-files-found: error
+          retention-days: 14

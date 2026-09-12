@@ -15,6 +15,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from plugin_mujoco.models import SceneStartRequest
 from plugin_mujoco.settings import Settings
 
 
@@ -26,3 +29,19 @@ def test_process_settings_default_to_realtime(monkeypatch, tmp_path: Path):
 
     monkeypatch.setenv("PLUGIN_MUJOCO_REALTIME", "0")
     assert Settings.from_env().realtime is False
+
+
+@pytest.mark.parametrize("system,expected", [("Linux", "egl"), ("Darwin", "cgl"), ("Windows", "glfw")])
+def test_native_render_backend_defaults(monkeypatch, tmp_path, system, expected):
+    monkeypatch.setattr("plugin_mujoco.settings.platform.system", lambda: system)
+    monkeypatch.delenv("MUJOCO_GL", raising=False)
+    assert Settings(asset_root=tmp_path).render_backend == expected
+    assert Settings.from_env().render_backend == expected
+
+
+def test_explicit_render_backend_is_preserved_on_macos(monkeypatch):
+    monkeypatch.setattr("plugin_mujoco.settings.platform.system", lambda: "Darwin")
+    monkeypatch.setenv("MUJOCO_GL", "GLFW")
+    assert Settings.from_env().render_backend == "glfw"
+    request = SceneStartRequest(request_id="macos", layout="layout001", render_backend="cgl")
+    assert request.render_backend == "cgl"

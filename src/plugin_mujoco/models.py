@@ -73,7 +73,7 @@ class SceneStartRequest(StrictModel):
     layout: str = Field(min_length=1, max_length=128)
     seed: int = 0
     headless: bool = True
-    render_backend: Literal["auto", "egl", "osmesa", "glfw"] = "auto"
+    render_backend: Literal["auto", "egl", "osmesa", "glfw", "cgl"] = "auto"
 
 
 class SceneDescriptor(StrictModel):
