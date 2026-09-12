@@ -50,6 +50,7 @@ jobs:
             dist/*
             .output/macos-report.json
             coverage.xml
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
   graphics:
@@ -88,4 +89,5 @@ jobs:
         with:
           name: macos-arm64-graphics-evidence
           path: .output/macos-graphics-report.json
+          include-hidden-files: true
           if-no-files-found: error
