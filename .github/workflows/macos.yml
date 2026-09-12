@@ -33,7 +33,7 @@ jobs:
           uv sync --frozen --python 3.13.15 --extra dev
       - name: Test API and platform defaults
         run: |
-          uv run --frozen ruff check src/plugin_mujoco/settings.py src/plugin_mujoco/models.py tests/test_settings.py tests/test_native_smoke.py
+          uv run --frozen ruff check src/plugin_mujoco/settings.py src/plugin_mujoco/models.py tests/test_settings.py tests/test_native_smoke.py tools/macos_smoke.py
           uv run --frozen pytest -p pytest_cov -m 'not native' --cov=plugin_mujoco --cov-report=term-missing --cov-report=xml
       - name: Exercise native physics (hosted runner has no usable CGL)
         run: uv run --frozen python tools/macos_smoke.py --physics-only --output .output/macos-report.json

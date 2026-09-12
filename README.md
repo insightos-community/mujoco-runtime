@@ -38,6 +38,26 @@ Runtime Packs provide the runtime and dependencies, **not** Robot models, scene 
 
 The current one-click product bundle is Linux x86_64, verified on Ubuntu 24.04. Source availability and cross-platform upstream Wheels do not establish validation of this complete runtime on every OS.
 
+## Native macOS development
+
+Apple Silicon development uses Python 3.13.15 and NumPy 2.3.5. Darwin defaults
+to the native CGL backend; no Linux Mesa or EGL bundle is required.
+
+```bash
+uv sync --frozen --python 3.13.15 --extra dev
+uv run --frozen python tools/macos_smoke.py --output .output/macos-report.json
+MUJOCO_ASSET_ROOT=/absolute/path/to/mujoco-asset uv run --frozen pytest tests/test_native_smoke.py -vv
+```
+
+The native CI validates CPU physics, 62 API/logic tests, and package builds on
+macOS arm64. Standard hosted macOS 15 runners returned `invalid pixel format`
+when requesting CGL. Their CPU result does **not** qualify graphics. For graphics
+validation, run the commands above on a physical Apple Silicon Mac, or manually
+run `Native macOS` with `graphics=true` after registering a runner with labels
+`self-hosted`, `macOS`, `ARM64`, `semantic-graphics` in an active graphical session.
+That job requires rendered pixels and all three real pallet layouts to pass.
+A complete macOS one-click installer has not yet been released.
+
 ## Troubleshooting
 
 - Asset not found: check the asset root, catalogs, and completed LFS downloads.
