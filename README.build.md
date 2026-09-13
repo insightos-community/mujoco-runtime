@@ -8,7 +8,7 @@ To reconstruct another published release, read its `release.json` and select
 both `source_commit` and `build_recipe_commit`; a source tag alone may predate
 the CI scripts. This recipe reproduces the build steps, not historical archive bytes.
 
-Prerequisites: Linux x86_64, uv 0.12.12, Python build tooling, zstd and PyYAML. The glibc release script selects Python 3.10.19 and the committed uv.lock.
+Prerequisites: Linux x86_64, Git, Make, uv 0.12.12, Python build tooling, zstd and PyYAML. The glibc release script selects Python 3.10.19 and the committed uv.lock.
 
 The release scripts expect **two sibling checkouts**, `automation/` for build
 scripts and `source/` for the component. Run these commands from a fresh working
@@ -31,6 +31,19 @@ export GITHUB_SHA=d720d276ea23262a50bc0ddbc44ae50a5ffab434
 
 The executable build entry is [`.github/scripts/build.sh`](.github/scripts/build.sh);
 archive validation is [`.github/scripts/package.py`](.github/scripts/package.py).
+The runtime pack also reads the Framework and scene catalogs. Reproduce the two
+additional dependency checkouts from the CI workflow before invoking the build;
+their directory names are part of the build-script interface. Only catalog metadata
+is consumed here, so the asset checkout does not need an LFS payload download.
+
+```bash
+mkdir -p "$REPRO_ROOT/dependencies/semantic-scene"
+git clone --no-checkout https://github.com/insightos-community/Semantic-Framework.git "$REPRO_ROOT/dependencies/semantic-framework"
+GIT_LFS_SKIP_SMUDGE=1 git -C "$REPRO_ROOT/dependencies/semantic-framework" checkout --detach 81ea016480f099f9db95bd48c083ee99d8806a4d
+git clone --no-checkout https://github.com/insightos-community/mujoco-asset.git "$REPRO_ROOT/dependencies/semantic-scene/mujoco-asset"
+GIT_LFS_SKIP_SMUDGE=1 git -C "$REPRO_ROOT/dependencies/semantic-scene/mujoco-asset" checkout --detach f9855e6dd1419f890b418a9f398bd1d5ec49b57c
+```
+
 From `source/` in the layout above:
 
 ```bash
