@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import uvicorn
 
 from plugin_mujoco.api import create_app
@@ -27,7 +29,14 @@ app = create_app(settings)
 
 
 def run() -> None:
-    uvicorn.run(app, host=settings.host, port=settings.port)
+    if sys.platform != "win32":
+        uvicorn.run(app, host=settings.host, port=settings.port)
+        return
+    from plugin_mujoco.windows_stop import stop_endpoint
+
+    server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port))
+    with stop_endpoint(lambda: setattr(server, "should_exit", True)):
+        server.run()
 
 
 if __name__ == "__main__":

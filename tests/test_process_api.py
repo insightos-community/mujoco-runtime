@@ -64,6 +64,12 @@ def test_process_sigterm_and_port_conflict(asset_root):
     second = None
     try:
         _wait_health(port)
+        if sys.platform == "win32":
+            from plugin_mujoco.windows_stop import request_stop
+
+            with pytest.raises(ValueError, match="identity changed"):
+                request_stop(process.pid, "0000000000000000")
+            _wait_health(port)
         second = subprocess.Popen(
             [sys.executable, "-m", "plugin_mujoco.main"],
             cwd=os.getcwd(),
@@ -76,7 +82,12 @@ def test_process_sigterm_and_port_conflict(asset_root):
         output = (second.stdout.read() or "").lower()
         assert "address already in use" in output or "address in use" in output
     finally:
-        process.terminate()
+        if sys.platform == "win32":
+            from plugin_mujoco.windows_stop import identity, request_stop
+
+            request_stop(process.pid, identity(process.pid))
+        else:
+            process.terminate()
         assert process.wait(timeout=5) in {0, -15}
         output = process.stdout.read() if process.stdout else ""
         assert "Application shutdown complete" in output
