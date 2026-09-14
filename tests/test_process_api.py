@@ -44,7 +44,7 @@ def _wait_health(port: int, timeout: float = 5.0) -> None:
 
 
 @pytest.mark.process
-def test_process_sigterm_and_port_conflict(asset_root):
+def test_process_sigterm_and_port_conflict(asset_root, tmp_path):
     port = _free_port()
     environment = {
         **os.environ,
@@ -53,8 +53,17 @@ def test_process_sigterm_and_port_conflict(asset_root):
         "PLUGIN_MUJOCO_PORT": str(port),
         "PYTHONPATH": "src",
     }
+    # Windows venv python.exe is a redirector; its PID is not the interpreter PID.
+    # The harness records the actual child identity before invoking the real entry.
+    pid_file = tmp_path / "runtime.pid"
+    environment["TEST_RUNTIME_PID_FILE"] = str(pid_file)
+    entry = (
+        "import os, pathlib, runpy; "
+        "pathlib.Path(os.environ['TEST_RUNTIME_PID_FILE']).write_text(str(os.getpid())); "
+        "runpy.run_module('plugin_mujoco.main', run_name='__main__')"
+    )
     process = subprocess.Popen(
-        [sys.executable, "-m", "plugin_mujoco.main"],
+        [sys.executable, "-c", entry],
         cwd=os.getcwd(),
         env=environment,
         stdout=subprocess.PIPE,
@@ -64,11 +73,12 @@ def test_process_sigterm_and_port_conflict(asset_root):
     second = None
     try:
         _wait_health(port)
+        runtime_pid = int(pid_file.read_text())
         if sys.platform == "win32":
             from plugin_mujoco.windows_stop import request_stop
 
             with pytest.raises(ValueError, match="identity changed"):
-                request_stop(process.pid, "0000000000000000")
+                request_stop(runtime_pid, "0000000000000000")
             _wait_health(port)
         second = subprocess.Popen(
             [sys.executable, "-m", "plugin_mujoco.main"],
@@ -80,12 +90,12 @@ def test_process_sigterm_and_port_conflict(asset_root):
         )
         assert second.wait(timeout=5) != 0
         output = (second.stdout.read() or "").lower()
-        assert "address already in use" in output or "address in use" in output
+        assert any(message in output for message in ("address already in use", "address in use", "10048"))
     finally:
         if sys.platform == "win32":
             from plugin_mujoco.windows_stop import identity, request_stop
 
-            request_stop(process.pid, identity(process.pid))
+            request_stop(int(pid_file.read_text()), identity(int(pid_file.read_text())))
         else:
             process.terminate()
         assert process.wait(timeout=5) in {0, -15}
