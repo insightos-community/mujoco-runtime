@@ -54,3 +54,11 @@ Copyright 2026 InsightOS。自有代码采用 [Apache-2.0](LICENSE)；第三方�
 ## 三个平台的构建复现
 
 参见 [glibc、musl 与 macOS 构建说明](README.build.md)：包含已锁定的源码版本、实际脚本入口、工具要求、本地与 CI 指令、产物位置和平台验证范围。
+
+## Windows 原生验证
+
+Windows x64 已增加 CPython 3.13.15、NumPy 2.3.5、MuJoCo 3.4.0 的原生 CI，
+覆盖 API、场景校验、正常退出及物理步进。构建与复现命令见
+[Windows 构建说明](README.build.md#windows-x64-native-validation)。
+普通 CI 的物理测试不代表显卡渲染验证；实际桌面/驱动测试需单独记录。
+完整 quick-start Windows 安装包的集成进度以 quick-start 仓库为准。

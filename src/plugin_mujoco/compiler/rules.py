@@ -22,8 +22,16 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+
+
+def is_relative_asset_key(value: str) -> bool:
+    """Asset identifiers must stay relative under either supported path syntax."""
+    return bool(value) and all(
+        not path.anchor and ".." not in path.parts
+        for path in (PurePosixPath(value), PureWindowsPath(value))
+    )
 
 
 def document_rule_issues(document: Any) -> list[tuple[str | None, str, str]]:
@@ -88,6 +96,9 @@ def asset_file_issues(asset_root: Path, document: Any) -> list[tuple[str | None,
             referenced_by.setdefault(node.asset_id, []).append(node.id)
 
     for asset in document.assets:
+        if not is_relative_asset_key(asset.asset_key):
+            issues.append((None, f"assets.{asset.id}.asset_key", "资产路径越过资产仓"))
+            continue
         try:
             candidate = (root / asset.asset_key).resolve()
             candidate.relative_to(root)
