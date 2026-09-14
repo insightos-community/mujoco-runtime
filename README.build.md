@@ -138,3 +138,30 @@ See the [complete installer and repository index](https://github.com/insightos-c
 platform locks and end-to-end validation. Local build commands do not publish a
 Release. Publishing requires repository write access and a new version tag;
 existing release tags/assets should not be replaced.
+
+## Windows x64 native validation
+
+Use PowerShell, Git and uv 0.12.12. The lock selects CPython 3.13.15,
+NumPy 2.3.5 and MuJoCo 3.4.0; Windows uses Pydantic 2.13.4.
+
+```powershell
+$env:MUJOCO_GL = 'glfw'
+$env:PYTHONUTF8 = '1'
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
+uv sync --frozen --python 3.13.15 --extra dev
+uv run --frozen pytest -p pytest_cov -m 'not native'
+uv run --frozen python tools/windows_smoke.py --physics-only --output .output/windows-report.json
+uv build
+uv build --project packages/mujoco-visuals --out-dir dist
+```
+
+The [Windows workflow](.github/workflows/windows.yml) runs these commands on
+`windows-2022`. Physics and API validation do not qualify desktop GPU rendering;
+run the smoke without `--physics-only` in the target Windows desktop/driver
+session and retain the rendering report separately.
+
+Windows `plugin_mujoco.main` accepts a graceful stop through the local named event
+`Local\InsightOS.Semantic.Stop.<pid>.<creation-time-hex>`. This endpoint sets
+Uvicorn's `should_exit` and runs application shutdown. A venv `python.exe` may be
+a redirector: management code must use the actual interpreter's PID/creation time.
+Do not treat `Popen.terminate()` as graceful Windows shutdown.
