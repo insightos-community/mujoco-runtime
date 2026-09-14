@@ -30,8 +30,8 @@ dependencies = [
   "numpy==2.3.5; python_version >= '3.13'",
   "Pillow==11.2.1",
   # Native macOS 3.13 installers share the Robot Skill dependency set.
-  "pydantic==2.13.4; sys_platform == 'darwin' and python_version >= '3.13'",
-  "pydantic==2.11.5; sys_platform != 'darwin' or python_version < '3.13'",
+  "pydantic==2.13.4; sys_platform != 'linux' and python_version >= '3.13'",
+  "pydantic==2.11.5; sys_platform == 'linux' or python_version < '3.13'",
   "PyYAML==6.0.2",
   "semantic-mujoco-visuals",
   "uvicorn[standard]==0.34.3",

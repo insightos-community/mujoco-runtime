@@ -1,0 +1,46 @@
+name: Native Windows
+on:
+  push:
+    branches: [main, feat/windows-native]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      MUJOCO_GL: glfw
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: 0.12.12
+          enable-cache: true
+      - name: Install native locked dependencies
+        run: uv sync --frozen --python 3.13.15 --extra dev
+      - name: API and lifecycle tests
+        run: uv run --frozen pytest -p pytest_cov -m 'not native' --junitxml=windows-tests.xml
+      - name: Native physics without GPU qualification
+        run: uv run --frozen python tools/windows_smoke.py --physics-only --output .output/windows-report.json
+      - name: Build runtime and visualization wheels
+        run: |
+          uv build
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime wheel failed' }
+          uv build --project packages/mujoco-visuals --out-dir dist
+          if ($LASTEXITCODE -ne 0) { throw 'Visualization wheel failed' }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: mujoco-runtime-windows-amd64
+          path: |
+            dist/*
+            .output/windows-report.json
+            windows-tests.xml
+          include-hidden-files: true
+          if-no-files-found: error
