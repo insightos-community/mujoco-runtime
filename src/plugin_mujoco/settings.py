@@ -1,31 +1,10 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """进程设置。"""
 
 from __future__ import annotations
 
 import os
-import platform
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-
-
-def default_render_backend() -> str:
-    """Select the native offscreen backend without importing MuJoCo."""
-    return {"Darwin": "cgl", "Windows": "glfw"}.get(platform.system(), "egl")
 
 
 @dataclass(frozen=True)
@@ -33,7 +12,7 @@ class Settings:
     asset_root: Path
     host: str = "127.0.0.1"
     port: int = 8090
-    render_backend: str = field(default_factory=default_render_backend)
+    render_backend: str = "egl"
     backend: str = "mujoco"
     realtime: bool = False
     authoring_root: Path | None = None
@@ -60,7 +39,7 @@ class Settings:
             asset_root=asset_root,
             host=os.getenv("PLUGIN_MUJOCO_HOST", "127.0.0.1"),
             port=int(os.getenv("PLUGIN_MUJOCO_PORT", "8090")),
-            render_backend=os.getenv("MUJOCO_GL", default_render_backend()).lower(),
+            render_backend=os.getenv("MUJOCO_GL", "egl").lower(),
             backend=os.getenv("PLUGIN_MUJOCO_BACKEND", "mujoco").lower(),
             # 进程入口服务于Web、Pilot和真机等价的实时控制，默认必须给HTTP、
             # 传感与命令线程留出调度窗口。离线批处理仍可显式设置为0，或在

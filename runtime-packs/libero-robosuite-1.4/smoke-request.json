@@ -1,7 +1,7 @@
 {
   "request_id": "runtime-pack-libero-smoke",
   "runtime_profile_id": "libero-robosuite-1.4",
-  "layout": "init-state-0",
+  "layout": "init-0",
   "seed": 7,
   "headless": true,
   "render_backend": "egl"

@@ -1,76 +1,195 @@
 # Semantic MuJoCo Runtime
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+`plugin-mujoco` 是按场景启动的 MuJoCo Runtime。产品环境由 Semantic Framework 启动和停止；开发者也可以使用 `uv run` 独立运行。它负责加载已经构建的场景、推进物理仿真、执行低层轨迹、导出 GLB 场景与位姿流，并生成 Robot 传感器数据。
 
-🌐 A physics and rendering service for Semantic simulation. It loads scene assets and exposes low-level robot/sensor operations. Planning, IK policy, task Skills, and robot orchestration belong to other components.
+Plugin 不计算逆运动学（IK）、导航路径或抓取策略，也不包含 Ability、Robot Skill、Agent、MCP 或 Semantic Map。完整 Robot 执行链由 `semantic-robot-sdk` 规划轨迹，再由本 Runtime 的 RobotDriver 在物理线程中执行。
 
-## Structure
+## 当前实现边界
 
-- `src/plugin_mujoco/` — API, scene loading/compilation, physics, robots, sensors, and streaming.
-- `packages/mujoco-visuals/` — shared visualization package.
-- `profiles/` — native and optional environment profiles.
-- `tools/` · `runtime-packs/` — runtime packaging.
-- `tests/` — unit and integration tests.
+- `native-mujoco`：已实现 Runtime 生命周期、异步模型加载、三套拆码垛布局、虚拟 R1 Pro、低层轨迹、GLB/位姿流、RGB/Depth/Contact/Holding、场景快照、stop/hold/reset 和 generation 隔离。
+- `robosuite-1.5`：已实现 Lift/Stack 隔离 Runtime、Franka 绝对关节轨迹、夹爪、GLB/位姿流、RGB/Depth/Contact、生命周期、stop/hold/reset 和原生 reward/success 证据。
+- `libero-robosuite-1.4`：已实现固定 suite/task/init-state 的隔离 Runtime，并通过同一 Franka、视觉导出、传感器、生命周期和 evaluator 接口运行。LIBERO-Pro 复用该环境，通过独立 runner 生成扰动与基础/扰动对比报告。
+- Fake Backend：只用于单元测试和 Framework/Web 并行开发，不能作为 native 或 benchmark Profile 的验收证据。
 
-## 🛠 Develop and build
+Runtime 正式接收的 Robot 命令只有：
 
-The current package requires **Python >=3.10,<3.13**. Use an environment separate from Robot's Python 3.13. Linux rendering requires compatible EGL/Mesa drivers and separately obtained, licensed scene assets.
+- `joint_trajectory`
+- `base_trajectory`
+- `gripper_command`
+
+`stop` 和 `hold` 使用独立端点。末端位姿、导航目标、MuJoCo action array、body/geom ID 都不进入公共命令。
+
+## 源码仓库与 Runtime Pack
+
+本仓库是开发源码，不是正式机器上的安装目录。产品发布由固定 `v0.4.x`
+Tag 构建三个离线 Runtime Pack：
+
+- `native-mujoco`：Plugin Wheel、native 依赖、拆码垛公共目录与 Layout 模板；
+- `robosuite-1.5`：Profile Wheel、robosuite 1.5 固定依赖和 Lift/Stack 索引；
+- `libero-robosuite-1.4`：Profile Wheel、robosuite 1.4 固定依赖及 LIBERO 索引。
+
+Pack 内包含固定 Python 版本、离线 Wheelhouse、依赖锁、场景索引、smoke
+请求、许可提示和版本验证文件。它不包含 Project、Mesh、R1/Franka 模型、
+LIBERO/LIBERO-Pro 源码或 benchmark 数据。大型和受限内容由管理员安装时提供
+只读目录，Framework 把解析后的绝对路径写入 `RuntimeInstallation`。
+
+~~~bash
+# CI/发布负责人构建 Pack；普通用户不执行这些命令。
+make runtime-pack-native PACK_VERSION=0.4.0
+make runtime-pack-robosuite PACK_VERSION=0.4.0
+make runtime-pack-libero PACK_VERSION=0.4.0
+~~~
+
+Builder 会把 `semantic-sim-profiles` 和没有上游二进制制品的依赖都在 CI 中预构建
+为 Wheel；正式 Tag 构建时，Pack SemVer 必须与全部 Wheel 的 METADATA 版本一致，
+因此 `0.4.0.dev0` 源码不能伪装成正式 `0.4.0` Pack。开发分支直接运行 `make
+runtime-pack-native` 时默认生成 `0.4.0-dev.0`。正式 Pack 不包含 `pip install -e`、
+源码相对路径或现场构建步骤。当前仓库尚未加入经批准的公共
+产品许可证，因此生成制品只允许授权的内部部署，不能把提示文件误当作开源许可。
+
+## 软件分层
+
+```text
+api             HTTP 与二进制流边界
+application     用例入口
+compiler        SceneDocument 到 MuJoCo 场景的构建入口
+loaders         Runtime Profile 探测与组件装配
+runtime         生命周期、物理线程和命令调度
+robots          低层轨迹 RobotDriver 与 Robot 映射
+sensors         传感器读取
+rendering       RGB/Depth 传感器离屏渲染执行器
+visuals         MjModel/MjData 到 GLB 与位姿流
+assets          引擎内部对象到公共快照的转换
+streaming       多客户端共享的 latest-frame 缓冲
+native          原生 MuJoCo 具体实现
+```
+
+物理线程是唯一可以修改 MuJoCo `MjModel/MjData` 的线程。API、视觉导出、位姿流和传感器线程只提交操作或读取快照；慢速流客户端只会丢弃旧数据，不会阻塞物理步进。
+
+## 源码开发启动
 
 ```bash
-uv sync --python 3.10 --frozen --extra dev
-export MUJOCO_ASSET_ROOT=/absolute/path/to/mujoco-asset
+uv sync --frozen --extra dev
+export MUJOCO_ASSET_ROOT=/absolute/path/to/mujoco_asset
 export MUJOCO_GL=egl
 uv run plugin-mujoco
 ```
 
-The native development service uses port `8090`. For managed use, quick-start registers it with Server instead of treating a manually started process as a registered Runtime.
+服务默认监听 `127.0.0.1:8090`。可信开发网络需要远程访问时，可以设置 `PLUGIN_MUJOCO_HOST=0.0.0.0`。
 
 ```bash
+curl http://127.0.0.1:8090/healthz
+curl http://127.0.0.1:8090/api/v1/runtime
+curl http://127.0.0.1:8090/api/v1/runtime-profiles
+curl http://127.0.0.1:8090/api/v1/scenes
+```
+
+FastAPI `/docs` 展示全部接口。Framework 使用 `/api/v1/runtime-bundles` 注册已校验场景，通过场景实例端点启动、暂停、单步、继续、reset 和 stop。
+
+robosuite 和 LIBERO 必须使用各自锁定的环境，不与 native Runtime 混装：
+
+```bash
+# robosuite Lift / Stack，默认 127.0.0.1:8091
+MUJOCO_GL=egl \
+SEMANTIC_SIM_PROFILE=robosuite-1.5 \
+PLUGIN_MUJOCO_PORT=8091 \
+uv run --project profiles/robosuite --frozen semantic-sim-runtime
+
+# LIBERO 原生任务目录，默认 127.0.0.1:8092
+MUJOCO_GL=egl \
+SEMANTIC_SIM_PROFILE=libero-robosuite-1.4 \
+SEMANTIC_LIBERO_ROOT=/absolute/path/to/LIBERO \
+PLUGIN_MUJOCO_PORT=8092 \
+uv run --project profiles/libero --frozen semantic-sim-runtime
+```
+
+LIBERO 的 `GET /api/v1/scenes` 从固定上游安装读取所有 suite/task、语言描述和
+实际可用初态。`scene_key` 为 `suite:task_id`，`layout` 为 `init-N`，编号沿用
+上游 benchmark 默认顺序；不再由 `SEMANTIC_LIBERO_SUITE/TASK_ID` 限制目录。
+BDDL 或初态缺失时条目返回 `available=false` 及原因。目录可用只表示原生任务
+资源已安装，不表示模型能完成该任务。目录缓存随 Runtime 进程重启刷新。
+
+### LIBERO 可选策略控制接口（开发中）
+
+默认仍为原有 `JOINT_POSITION` 关节轨迹；独立的策略部署可设置
+`SEMANTIC_LIBERO_CONTROLLER=OSC_POSE`。该配置的 Robot Profile 只声明
+`control_sequence`，不伪装成关节轨迹控制器。末端输入为世界坐标的米制位移和
+轴角弧度增量，夹爪方向正数关闭、负数打开、零保持；在 Runtime 内按实际
+OSC 缩放映射到上游 action。每个序列样本只执行一个 0.05 秒控制周期。
+
+- `POST /api/v1/robots/{robot_id}/commands`：`type=control_sequence`，携带
+  `execution_id`、`scene_generation` 和 `control_sequence.control_period_s/samples`。
+- `POST /api/v1/robots/{robot_id}/executions/{execution_id}/cancel`：取消执行并
+  拒绝该身份的迟到序列；请求体携带 `scene_generation`。沿用已有命令状态接口。
+- `GET /api/v1/robots/{robot_id}/observation`：同一采样时刻的状态、原始双相机
+  RGB 与两指关节状态。沿用四字节大端 JSON 头长度 + JSON + 二进制缓冲格式，
+  不翻转像素、不经 JPEG 转码，不将展示图当作模型输入。
+
+序列执行完成不等于抓取或原生任务完成。物理世界在空队列、命令完成和推理等待
+时继续推进；场景不因原生 horizon 自动 reset。`scripts/verify_libero_control.py`
+用于独立真实环境接口验收，与 VLA/Agent 任务验收分开记录。目前仍在接入验证，
+不能仅凭这些接口或单元测试宣称 SmolVLA 可用。
+
+这两个 Profile 是只读原生环境，因此拒绝 `RuntimeBundle` 和 SceneDocument 编辑。它们与 native Runtime 共享场景生命周期、Franka 描述、低层轨迹、GLB/位姿流及传感器协议。RGB 输出 JPEG；Profile 深度保持 `float32-le` 原始缓冲，未完成相机近远平面换算前不会冒充毫米深度。
+
+## 独立验收
+
+启动 native Runtime 后执行：
+
+```bash
+uv run plugin-mujoco-demo --layout layout001 --output .output/demo-layout001
+```
+
+该客户端验证低层底盘和关节轨迹、视觉场景/位姿流、传感器、pause/step/resume、reset 与 generation，并保存 JPEG、16 位 Depth PNG、场景快照和 JSON 报告。它不会伪造 IK、导航或完整拆码垛成功；这些能力由 `semantic-robot-sdk` 与 Ability 的组合测试验收。
+
+`Holding` 只表示同一个物体同时与同侧夹爪的两根手指发生真实接触。Runtime 不会关闭物体碰撞、修改物体位姿或建立隐藏附着。当前拆码垛箱体最小边为 0.34 米，而单个 R1 Pro 夹爪的有效开口约为 0.1 米；因此“单夹爪搬运现有箱体”不是当前可通过的物理验收项。产品闭环必须先确定吸盘、双臂抱持或专用可夹持测试件，不能在 Runtime 内伪造抓取成功。
+
+另外两套布局可运行生命周期与传感器 smoke：
+
+```bash
+uv run plugin-mujoco-demo --layout layout002 --scene-smoke --output .output/demo-layout002
+uv run plugin-mujoco-demo --layout layout003 --scene-smoke --output .output/demo-layout003
+```
+
+## 测试
+
+```bash
+make lint
 make test
-uv build
+MUJOCO_ASSET_ROOT=/absolute/path/to/mujoco_asset MUJOCO_GL=egl make test-native
+make test-profiles
+make build
 ```
 
-`dist/` contains Python distributions. Release maintainers can use `make runtime-pack-native` to produce a versioned Runtime Pack; inspect its version and dependency inputs before distributing it.
+- `make test` 使用 Fake Backend 验证领域模型、命令队列、生命周期、接口和流缓冲。
+- `make test-native` 必须加载真实 MuJoCo 与资产，并单独输出 native 代码覆盖率；未提供资产时命令会明确失败，不能记为通过。
+- `make test-profiles` 验证 robosuite/LIBERO runner、Profile Runtime 生命周期、低层轨迹、传感器和二进制流；真实环境演示仍需分别使用对应锁定环境启动。
 
-## Use the outputs
+## 资产边界
 
-Runtime Packs provide the runtime and dependencies, **not** Robot models, scene assets, or Robot Bundles. Server assigns project/scene lifecycle; an idle runtime or absent scene is not necessarily an installation failure.
+插件不复制场景、mesh 或材质。通过 `MUJOCO_ASSET_ROOT` 指向资产仓。当前拆码垛入口为：
 
-The current one-click product bundle is Linux x86_64, verified on Ubuntu 24.04. Source availability and cross-platform upstream Wheels do not establish validation of this complete runtime on every OS.
-
-## Native macOS development
-
-Apple Silicon development uses Python 3.13.15 and NumPy 2.3.5. Darwin defaults
-to the native CGL backend; no Linux Mesa or EGL bundle is required.
-
-```bash
-uv sync --frozen --python 3.13.15 --extra dev
-uv run --frozen python tools/macos_smoke.py --output .output/macos-report.json
-MUJOCO_ASSET_ROOT=/absolute/path/to/mujoco-asset uv run --frozen pytest tests/test_native_smoke.py -vv
+```text
+scene/palletizing_depalletizing_001/
+├── scene_info.yaml
+├── layout001.yaml
+├── layout002.yaml
+├── layout003.yaml
+└── palletizing_depalletizing_001.xml
 ```
 
-The native CI validates CPU physics, 62 API/logic tests, and package builds on
-macOS arm64. Standard hosted macOS 15 runners returned `invalid pixel format`
-when requesting CGL. Their CPU result does **not** qualify graphics. For graphics
-validation, run the commands above on a physical Apple Silicon Mac, or manually
-run `Native macOS` with `graphics=true` after registering a runner with labels
-`self-hosted`, `macOS`, `ARM64`, `semantic-graphics` in an active graphical session.
-That job requires rendered pixels and all three real pallet layouts to pass.
-A complete macOS one-click installer has not yet been released.
+公共坐标使用米、弧度、秒和 `[x, y, z, w]` 四元数。引擎内部采用其他顺序时必须在边界处显式转换。
 
-## Troubleshooting
+正式用户不需要导出这些变量或手工运行上述进程。管理员使用 Framework CLI
+完成一次安装：
 
-- Asset not found: check the asset root, catalogs, and completed LFS downloads.
-- Render failure: check EGL/OSMesa configuration and driver availability.
-- Robot offline: inspect Server/Pilot/Bundle/Skill state as well as the simulation service.
-- Review asset provenance and [license scope](LICENSE_SCOPE.md) before redistribution.
+~~~bash
+semantic runtime install --pack semantic-native-mujoco-0.4.0.runtime.tar.zst \
+  --asset-root /data/semantic/mujoco-assets
+semantic runtime doctor --all
+semantic-server
+~~~
 
-[Detailed technical reference](README.reference.md) · [Packaging targets](Makefile)
-
-## License
-
-Copyright 2026 InsightOS. First-party code: [Apache-2.0](LICENSE). See [NOTICE](NOTICE) and [license scope](LICENSE_SCOPE.md) for third-party components and assets.
-
-## Reproducible platform builds
-
-See [glibc, musl and macOS build instructions](README.build.md) for pinned source revisions, exact scripts, tool requirements, local commands, CI reproduction and platform support boundaries.
+Framework 在 Project 打开后按需启动 Runtime，Project 退出后回收受管进程。
+源码模式仅供开发：`semantic runtime install --dev-source /path/to/plugin-mujoco
+--profile native-mujoco ...`，installation 会明确标记 `development`，不能用于 RC。

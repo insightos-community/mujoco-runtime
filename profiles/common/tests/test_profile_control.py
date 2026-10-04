@@ -1,18 +1,3 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 from __future__ import annotations
 
 import numpy as np
@@ -129,3 +114,35 @@ def test_libero_absolute_goal_is_converted_to_bounded_delta_action() -> None:
 
     with pytest.raises(ValueError, match="控制范围"):
         adapter.joint_position_action(target, gripper_action=2.0)
+
+
+def test_libero_osc_action_inverts_native_controller_scaling():
+    adapter = LiberoAdapter.__new__(LiberoAdapter)
+    adapter.controller_name = "OSC_POSE"
+    adapter._env = _LiberoWrapper()
+    controller = adapter._env.env.robots[0].controller
+    controller.input_min = np.full(6, -1.0)
+    controller.input_max = np.full(6, 1.0)
+    controller.output_min = np.array([-0.05] * 3 + [-0.5] * 3)
+    controller.output_max = -controller.output_min
+    adapter._env.env.action_spec = (np.full(7, -1.0), np.full(7, 1.0))
+    action = adapter.end_effector_delta_action(
+        [0.025, 0.0, -0.05], [0.1, -0.5, 0.0], gripper_action=1,
+    )
+    assert action == pytest.approx([0.5, 0, -1, 0.2, -1, 0, 1])
+    with pytest.raises(ValueError, match="控制范围"):
+        adapter.end_effector_delta_action([0.06, 0, 0], [0, 0, 0], gripper_action=0)
+
+
+def test_libero_policy_observation_does_not_use_display_flip():
+    adapter = LiberoAdapter.__new__(LiberoAdapter)
+    original = np.arange(18, dtype=np.uint8).reshape(2, 3, 3)
+    adapter._raw_observation = {
+        "agentview_image": original, "robot0_eye_in_hand_image": original[:, ::-1],
+        "robot0_eef_pos": np.zeros(3), "robot0_eef_quat": np.array([0, 0, 0, 1]),
+        "robot0_gripper_qpos": np.array([0.03, -0.02]), "robot0_joint_pos": np.zeros(7),
+    }
+    result = adapter.policy_observation()
+    assert np.array_equal(result["agentview_image"], original)
+    result["agentview_image"][:] = 0
+    assert original.sum() > 0

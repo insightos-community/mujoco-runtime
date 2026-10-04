@@ -1,0 +1,162 @@
+# plugin-mujoco CI：功能分支跑 lint / 单测 / 合同 / 构建 / gitleaks。
+# Docker Hub 在 Runner 上经常超时，基础镜像走华为云同步源；
+# ghcr 专项 Job 走 1ms 代理。gitleaks 不拉第三方镜像，改为下载官方二进制。
+stages: [lint, test, build, security]
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+  GITHUB_PROXY: "https://ghfast.top/"
+  GITLEAKS_VERSION: "8.24.2"
+  CI_IMAGE_PYTHON: "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.10.15"
+  CI_IMAGE_UV_PY310: "docker.1ms.run/ghcr.io/astral-sh/uv:0.11.14-python3.10-trixie-slim"
+  CI_IMAGE_UV_PY38: "docker.1ms.run/ghcr.io/astral-sh/uv:python3.8-bookworm-slim"
+
+default:
+  image: $CI_IMAGE_PYTHON
+  interruptible: true
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+  cache:
+    key: "plugin-mujoco-python310"
+    paths:
+      - .cache/pip
+      - .cache/uv
+  before_script:
+    - python -m pip install -U pip uv
+    - uv sync --frozen --extra dev
+
+.v040_real_rules:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v0\.4\.[0-9]+(-rc\.[0-9]+)?$/'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - when: never
+
+lint:
+  stage: lint
+  script:
+    - uv lock --check
+    - make lint
+
+test:
+  stage: test
+  script:
+    - make test
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+contracts:
+  stage: test
+  script:
+    - make test-contracts
+
+# 原生 MuJoCo 与资产不塞进普通 Python Job。RC 必须在挂载了已审查资产的
+# 专项 Runner 上执行；变量缺失会直接失败，不能把未运行记作通过。
+native_real:
+  stage: test
+  image: $CI_IMAGE_UV_PY310
+  tags: [semantic-mujoco-native]
+  extends: .v040_real_rules
+  before_script: []
+  script:
+    - test -n "$MUJOCO_ASSET_ROOT"
+    - uv sync --frozen --extra dev
+    - make test-native
+  artifacts:
+    when: always
+    paths: [.coverage]
+    expire_in: 7 days
+
+# robosuite 1.5 使用自己的锁文件和 Runner，避免与 native/LIBERO 混装。
+robosuite_real:
+  stage: test
+  image: $CI_IMAGE_UV_PY310
+  tags: [semantic-mujoco-robosuite]
+  extends: .v040_real_rules
+  before_script: []
+  variables:
+    MUJOCO_GL: "egl"
+  script:
+    - uv sync --project profiles/robosuite --frozen
+    - make test-robosuite-real
+
+# 固定 LIBERO 与 LIBERO-Pro 共用同一隔离环境；源码由 Runner 预挂载，
+# Job 不下载数据。comparison 与 RGB/Depth 证据必须作为 RC artifact 保存。
+libero_pro_real:
+  stage: test
+  image: $CI_IMAGE_UV_PY38
+  tags: [semantic-mujoco-libero]
+  extends: .v040_real_rules
+  before_script: []
+  variables:
+    MUJOCO_GL: "egl"
+  script:
+    - test -n "$SEMANTIC_LIBERO_ROOT"
+    - test -n "$SEMANTIC_LIBERO_REVISION"
+    - test -n "$SEMANTIC_LIBERO_PRO_ROOT"
+    - test -n "$SEMANTIC_LIBERO_PRO_REVISION"
+    - test -n "$SIMULATION_EVIDENCE_DIR"
+    - test "$SIMULATION_EVIDENCE_DIR" = "$CI_PROJECT_DIR/.output/test-evidence"
+    - uv sync --project profiles/libero --frozen
+    - make test-libero-real
+    - make test-libero-pro-real
+  artifacts:
+    when: always
+    paths: [.output/test-evidence/]
+    expire_in: 30 days
+
+build:
+  stage: build
+  script:
+    - make build
+  artifacts:
+    paths: [dist/]
+
+.runtime_pack_build:
+  stage: build
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v0\.4\.[0-9]+(-rc\.[0-9]+)?$/'
+    - when: never
+  before_script:
+    - apt-get update
+    # 只在 CI 构建缺少上游二进制制品的依赖 Wheel；目标机器不会现场编译源码。
+    - apt-get install -y --no-install-recommends build-essential zstd
+  artifacts:
+    paths: [dist-runtime-packs/]
+    expire_in: 30 days
+
+runtime_pack_native:
+  extends: .runtime_pack_build
+  image: $CI_IMAGE_UV_PY310
+  script:
+    - test -n "$CI_COMMIT_TAG"
+    - PACK_VERSION="${CI_COMMIT_TAG#v}" make runtime-pack-native
+
+runtime_pack_robosuite:
+  extends: .runtime_pack_build
+  image: $CI_IMAGE_UV_PY310
+  script:
+    - test -n "$CI_COMMIT_TAG"
+    - PACK_VERSION="${CI_COMMIT_TAG#v}" make runtime-pack-robosuite
+
+runtime_pack_libero:
+  extends: .runtime_pack_build
+  image: $CI_IMAGE_UV_PY38
+  script:
+    - test -n "$CI_COMMIT_TAG"
+    - PACK_VERSION="${CI_COMMIT_TAG#v}" make runtime-pack-libero
+
+gitleaks:
+  stage: security
+  before_script: []
+  script:
+    - bash ci/install-gitleaks.sh
+    - .ci-bin/gitleaks detect --source . --config .gitleaks.toml --verbose

@@ -1,18 +1,3 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 from __future__ import annotations
 
 import importlib.util
@@ -91,6 +76,20 @@ def test_pack_semver_must_match_python_wheel_version():
     assert builder.python_wheel_version("0.4.0-rc.2") == "0.4.0rc2"
     with pytest.raises(ValueError, match="只支持"):
         builder.python_wheel_version("0.4.0-preview")
+
+
+def test_libero_pack_matches_continuous_runtime_contract():
+    profile = _builder().profile_table()["libero-robosuite-1.4"]
+    assert profile.content_requirements == {}
+    assert "franka_model" not in profile.content_requirements
+    assert ROOT / "packages" / "mujoco-visuals" in profile.wheel_projects
+    source = ROOT / "runtime-packs/libero-robosuite-1.4"
+    assert json.loads((source / "smoke-request.json").read_text())["layout"] == "init-0"
+    settings = json.loads((source / "runtime-settings.json").read_text())
+    assert settings == {"controller": "OSC_POSE", "camera_width": 256, "camera_height": 256}
+    lock = (ROOT / "profiles/libero/uv.lock").read_text()
+    assert 'name = "opencv-python-headless"' not in lock
+    assert 'name = "opencv-python"\nversion = "4.6.0.66"' in lock
 
 
 def test_pack_catalog_is_stamped_with_exact_pack_version(tmp_path):

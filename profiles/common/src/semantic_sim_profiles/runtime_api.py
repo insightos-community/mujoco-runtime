@@ -1,18 +1,3 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """robosuite / LIBERO 隔离 Runtime 的 HTTP 与二进制流入口。
 
 本模块与 native MuJoCo Runtime 使用同一组公开路径。Profile 内部 action array
@@ -273,6 +258,20 @@ def create_app(service: Optional[ProfileRuntimeService] = None) -> FastAPI:
     def hold_robot(robot_id: str, payload: Dict[str, Any], request: Request) -> Dict[str, Any]:
         return _service(request).active().hold(robot_id, int(payload.get("scene_generation", 0)))
 
+    @robot.post("/robots/{robot_id}/executions/{execution_id}/cancel")
+    def cancel_execution(
+        robot_id: str, execution_id: str, payload: Dict[str, Any], request: Request,
+    ) -> Dict[str, Any]:
+        _service(request).active().cancel_execution(
+            robot_id, execution_id, int(payload.get("scene_generation", 0))
+        )
+        return {"execution_id": execution_id, "status": "cancelled"}
+
+    @robot.get("/robots/{robot_id}/observation")
+    def synchronized_observation(robot_id: str, request: Request) -> Response:
+        metadata, payload = _service(request).active().synchronized_observation(robot_id)
+        return Response(_packet(metadata, payload), media_type="application/octet-stream")
+
     @robot.get("/robots/{robot_id}/sensors")
     def sensors(robot_id: str, request: Request) -> List[Dict[str, Any]]:
         return _service(request).active().sensor_descriptors(robot_id)
@@ -418,6 +417,11 @@ def _frame_headers(metadata: Dict[str, Any]) -> Dict[str, str]:
 
 
 def main() -> None:
+    import sys
+    if len(sys.argv) == 3 and sys.argv[1] == "--prepare-scene":
+        from semantic_sim_profiles.scene_preview import prepare
+        prepare(sys.argv[2])
+        return
     host = os.getenv("PLUGIN_MUJOCO_HOST", "127.0.0.1")
     port = int(os.getenv("PLUGIN_MUJOCO_PORT", "8091"))
     uvicorn.run(create_app(), host=host, port=port)

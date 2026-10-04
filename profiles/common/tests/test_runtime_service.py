@@ -1,21 +1,8 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 from __future__ import annotations
 
+import copy
 import json
+import struct
 import threading
 import time
 from pathlib import Path
@@ -25,6 +12,7 @@ from typing import Any, Dict
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from semantic_mujoco_visuals import MujocoVisualExporter
 
 import semantic_sim_profiles.runtime_service as runtime_module
 from semantic_sim_profiles.runtime_api import create_app
@@ -33,6 +21,54 @@ from semantic_sim_profiles.runtime_service import (
     ProfileRuntimeError,
     ProfileRuntimeService,
 )
+
+
+def test_visual_groups_follow_native_renderer_without_changing_physics():
+    adapter = FakeProfileAdapter()
+    model, data = adapter.visual_model_data()
+    model.geom_group[:] = [0, 1]
+    visible = MujocoVisualExporter(model, data, visible_geom_groups=(1,)).export().content
+    default = MujocoVisualExporter(model, data).export().content
+
+    def mesh_nodes(content):
+        length = struct.unpack_from("<I", content, 12)[0]
+        document = json.loads(content[20:20 + length])
+        return sum("mesh" in node for node in document["nodes"])
+
+    assert mesh_nodes(visible) == 1
+    assert mesh_nodes(default) == 2
+    assert model.geom_group.tolist() == [0, 1]
+
+
+def test_hidden_collision_copy_cannot_remove_visible_material_mesh():
+    adapter = FakeProfileAdapter()
+    model, data = adapter.visual_model_data()
+    model.geom_type[:] = 7
+    model.geom_bodyid[:] = 1
+    model.geom_dataid[:] = 0
+    model.geom_size[:] = 1
+    model.geom_group[:] = [0, 1]
+    model.geom_matid[:] = [-1, 0]
+    assert MujocoVisualExporter(model, data)._hidden_duplicate_geoms() == {1}
+    exporter = MujocoVisualExporter(model, data, visible_geom_groups=(1,))
+    assert exporter._hidden_duplicate_geoms() == set()
+
+
+def test_compiled_mesh_vertices_are_not_scaled_twice():
+    adapter = FakeProfileAdapter()
+    model, data = adapter.visual_model_data()
+    model.geom_type[:] = 7
+    model.geom_dataid[:] = 0
+    model.mesh_vertadr, model.mesh_vertnum = [0], [3]
+    model.mesh_faceadr, model.mesh_facenum = [0], [1]
+    model.mesh_vert = np.asarray([[0, 0, 0], [.2, 0, 0], [0, .3, 0]])
+    model.mesh_face = np.asarray([[0, 1, 2]])
+    model.mesh_scale = [[.05, .05, .05]]
+    model.mesh_normaladr, model.mesh_normalnum = [-1], [0]
+    model.mesh_texcoordadr = [-1]
+    vertices, _, _, scale, _ = MujocoVisualExporter(model, data)._geometry(0)
+    assert scale == (1., 1., 1.)
+    np.testing.assert_allclose(vertices, model.mesh_vert)
 
 
 class FakeProfileAdapter:
@@ -81,6 +117,9 @@ class FakeProfileAdapter:
 
     def visual_model_data(self) -> tuple[Any, Any]:
         return self._visual_model, self._visual_data
+
+    def visual_geom_groups(self) -> tuple[int, ...]:
+        return (0, 1, 2)
 
     def visual_source_for_body(self, body_id: int, _object_source_ids: set[str]) -> str | None:
         return {1: "franka-0", 2: "cube"}.get(body_id)
@@ -184,6 +223,50 @@ def start(service: ProfileRuntimeService, request_id: str = "start-1"):
     return instance
 
 
+def test_reset_rebinds_visuals_to_recreated_physics(service, monkeypatch) -> None:
+    current, adapters = service
+    instance = start(current)
+    instance.pause()
+    adapter = adapters[0]
+    old_data = adapter._visual_data
+    original_reset = adapter.reset
+
+    def hard_reset(seed):
+        # LIBERO hard_reset 会替换整套物理数据；同一对象原地复位无法复现此问题。
+        adapter._visual_model = copy.deepcopy(adapter._visual_model)
+        adapter._visual_data = copy.deepcopy(old_data)
+        return original_reset(seed)
+
+    monkeypatch.setattr(adapter, "reset", hard_reset)
+    instance.reset()
+    assert instance._visual_exporter.data is adapter._visual_data
+    assert instance._visual_exporter.data is not old_data
+
+
+def test_resume_does_not_catch_up_paused_wall_time(service):
+    current, _ = service
+    instance = start(current)
+    instance.pause()
+    previous = instance.step_count
+    time.sleep(.3)
+    instance.resume()
+    time.sleep(.08)
+    instance.pause()
+    assert 1 <= instance.step_count - previous <= 3
+
+
+def test_worker_requests_do_not_each_wait_for_a_physics_tick(service):
+    current, _ = service
+    instance = start(current)
+    started = time.monotonic()
+    before = instance.step_count
+    for _ in range(10):
+        instance._worker_call(lambda adapter: adapter.joint_positions())
+    elapsed = time.monotonic() - started
+    assert elapsed < .25  # 旧 sleep 实现十次请求至少消耗十个 50ms 周期。
+    assert instance.step_count - before <= 5  # 读取请求不能驱动物理额外步进。
+
+
 def test_profile_runtime_exposes_worker_cached_non_origin_base_pose(service) -> None:
     current, adapters = service
     instance = start(current)
@@ -230,7 +313,11 @@ def test_profile_runtime_lifecycle_generation_and_idempotency(service) -> None:
     old_generation = instance.generation
     instance.reset()
     assert instance.generation == old_generation + 1
-    assert instance.snapshot()["objects"][0]["source_id"] == "cube"
+    snapshot = instance.snapshot()
+    assert snapshot["objects"][0]["source_id"] == "cube"
+    assert snapshot["generation"] == snapshot["robots"][0]["generation"]
+    assert snapshot["evaluation"]["metrics"]["steps"] == snapshot["sequence"] - 1
+    assert "contacts" in snapshot
 
     instance.stop()
     assert instance.state == "stopped"
@@ -466,7 +553,8 @@ def test_profile_runtime_http_and_binary_frames(service) -> None:
         current.instance(instance_id).wait_ready(2.0)
 
         robots = client.get(f"/api/v1/scene-instances/{instance_id}/robots").json()
-        assert robots[0]["sdk_package"] == "robot-sdk-franka"
+        assert robots[0]["sdk_package"] == "semantic-robot-sdk-franka"
+        assert robots[0]["backend"] == "mujoco"
 
         with client.websocket_connect("/api/v1/robots/franka-0/state/stream") as socket:
             state_packet = socket.receive_bytes()

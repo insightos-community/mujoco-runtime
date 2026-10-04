@@ -1,18 +1,3 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """robosuite / LIBERO 隔离 Runtime 的生命周期和低层 Robot 执行。
 
 物理环境只在 worker 线程中创建、步进、重置和释放。HTTP 线程只能修改本模块
@@ -29,6 +14,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,7 +23,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 import numpy as np
 from semantic_mujoco_visuals import MujocoVisualExporter
 
-from semantic_sim_profiles.libero import LiberoAdapter
+from semantic_sim_profiles.libero import LiberoAdapter, installed_task_catalog
 from semantic_sim_profiles.robosuite import FRANKA_JOINT_NAMES, RobosuiteAdapter
 
 
@@ -99,6 +85,7 @@ class ProfileRuntimeInstance:
         self._condition = threading.Condition(threading.RLock())
         self._calls: Deque[_WorkerCall] = deque()
         self._stop_requested = False
+        self._restart_clock = False
         self._adapter: Any = None
         self._observation: Dict[str, Any] = {}
         self._joint_positions: Dict[str, float] = {}
@@ -118,6 +105,10 @@ class ProfileRuntimeInstance:
         self._command_fingerprints: Dict[str, str] = {}
         self._active_command_id: Optional[str] = None
         self._active_started_sim_time = 0.0
+        self._sequence_actions: List[Any] = []
+        self._sequence_index = 0
+        self._action_command_id: Optional[str] = None
+        self._cancelled_executions: set[str] = set()
         self._gripper_action = 0.0
         self._sensor_sequences: Dict[str, int] = {}
         self._visual_exporter: Any = None
@@ -179,7 +170,7 @@ class ProfileRuntimeInstance:
 
         # API 线程不能直接接触仿真对象。同步屏障会在已经进入 adapter.step 的
         # 物理周期结束后由 worker 执行，因此 pause 返回时 sim_time 已稳定。
-        self._worker_call(lambda _adapter: None)
+        self._worker_call(self._hold_current)
         return self.view()
 
     def resume(self) -> Dict[str, Any]:
@@ -188,6 +179,7 @@ class ProfileRuntimeInstance:
                 return self.view()
             self._require_state("paused")
             self.state = "running"
+            self._restart_clock = True
             self.updated_at = utc_iso()
             self._condition.notify_all()
             return self.view()
@@ -219,6 +211,10 @@ class ProfileRuntimeInstance:
             observation = adapter.reset(int(self.request.get("seed", 0)))
             base_pose = adapter.base_pose()
             gripper_opening = adapter.gripper_opening()
+            # LIBERO/robosuite 的 hard reset 会重建 MjModel/MjData。旧 exporter
+            # 持有的对象不会随 generation 自动更新，必须重新导出并原子发布，
+            # 使浏览器几何、相机和位姿流对应同一个新的物理世界。
+            exporter, content, order, cameras = self._prepare_visuals(adapter, observation)
             with self._condition:
                 self._observation = _copy_observation(observation)
                 self._base_pose = _copy_base_pose(base_pose)
@@ -228,12 +224,20 @@ class ProfileRuntimeInstance:
                 self._last_reward = 0.0
                 self._terminated = False
                 self.generation += 1
+                self._cancelled_executions.clear()
+                self._sequence_actions = []
                 self.sim_time = 0.0
                 self.step_count = 0
                 self._sensor_sequences.clear()
                 self._pose_sequence = 0
+                self._visual_exporter = exporter
+                self._visual_content = content
+                self._visual_revision = hashlib.sha256(content).hexdigest()[:20]
+                self._visual_node_order = order
+                self._visual_cameras = cameras
                 self._capture_visual_pose_locked()
                 self.state = "running"
+                self._restart_clock = True
                 self.updated_at = utc_iso()
 
         self._worker_call(do_reset, timeout=30.0)
@@ -268,11 +272,35 @@ class ProfileRuntimeInstance:
         if int(request.get("scene_generation", 0)) != self.generation:
             raise ProfileRuntimeError("命令 generation 已失效")
         command_type = request.get("type")
-        if command_type not in {"joint_trajectory", "gripper_command"}:
+        if command_type not in {"joint_trajectory", "gripper_command", "control_sequence"}:
             raise ProfileRuntimeError("Franka Profile 只接受关节轨迹和夹爪命令")
+        actions = []
+        if command_type == "control_sequence":
+            payload = request.get("control_sequence") or {}
+            if not str(request.get("execution_id", "")).strip():
+                raise ProfileRuntimeError("控制序列缺少 execution_id", status_code=422)
+            if not payload.get("samples") or not math.isclose(
+                float(payload.get("control_period_s", 0)), self.control_period_s,
+                rel_tol=0, abs_tol=1e-9,
+            ):
+                raise ProfileRuntimeError("控制序列必须非空且控制周期为 0.05 秒", status_code=422)
+            try:
+                actions = self._worker_call(
+                    lambda adapter: adapter.prepare_control_sequence(payload["samples"])
+                )
+            except (AttributeError, KeyError, TypeError, ValueError) as error:
+                raise ProfileRuntimeError(str(error), status_code=422) from error
         fingerprint = _fingerprint(request)
         with self._condition:
             self._require_state("running")
+            if command_type not in self.robot_profile(robot_id)["capabilities"]["commands"]:
+                raise ProfileRuntimeError("当前控制配置不支持该命令", status_code=422)
+            # 校验序列时物理线程仍推进，期间也可能收到 reset / cancel。
+            # 真正入队前再次核对身份，不能让迟到的推理结果恢复已取消的执行。
+            if int(request.get("scene_generation", 0)) != self.generation:
+                raise ProfileRuntimeError("命令 generation 已失效")
+            if request.get("execution_id") in self._cancelled_executions:
+                raise ProfileRuntimeError("该执行已取消，拒绝迟到控制序列")
             previous = self._commands.get(command_id)
             if previous is not None:
                 if self._command_fingerprints[command_id] != fingerprint:
@@ -295,6 +323,8 @@ class ProfileRuntimeInstance:
             self._command_fingerprints[command_id] = fingerprint
             self._active_command_id = command_id
             self._active_started_sim_time = self.sim_time
+            self._sequence_actions = actions
+            self._sequence_index = 0
             self._condition.notify_all()
             return dict(command)
 
@@ -315,12 +345,34 @@ class ProfileRuntimeInstance:
             if command["status"] in {"succeeded", "failed", "cancelled", "unknown"}:
                 return dict(command)
             self._finish_command(command, "cancelled", "命令已停止，Robot 保持当前位置")
+            if command.get("execution_id"):
+                self._cancelled_executions.add(command["execution_id"])
             result = dict(command)
 
         # 等待可能已经进入 adapter.step 的最后一个周期结束。barrier 返回后，
         # worker 会先看到 active command 已清除，再生成保持当前位置的 action。
-        self._worker_call(lambda _adapter: None)
+        self._worker_call(self._hold_current)
         return result
+
+    def cancel_execution(self, robot_id: str, execution_id: str, generation: int) -> None:
+        self._check_robot(robot_id)
+        with self._condition:
+            if generation != self.generation or not execution_id:
+                raise ProfileRuntimeError("取消执行的身份或 generation 无效")
+            self._cancelled_executions.add(execution_id)
+            command = self._commands.get(self._active_command_id or "")
+            if command and command.get("execution_id") == execution_id:
+                self._finish_command(command, "cancelled", "执行已取消")
+            elif command:
+                # 迟到的旧执行取消不得暂停另一执行正在使用的 Robot。
+                return
+        self._worker_call(self._hold_current)
+
+    @staticmethod
+    def _hold_current(adapter: Any) -> None:
+        hold_current = getattr(adapter, "hold_current", None)
+        if hold_current is not None:
+            hold_current()
 
     def hold(self, robot_id: str, generation: int) -> Dict[str, Any]:
         self._check_robot(robot_id)
@@ -328,6 +380,8 @@ class ProfileRuntimeInstance:
             raise ProfileRuntimeError("hold generation 已失效")
         with self._condition:
             self._cancel_active("Robot 进入 hold")
+        self._worker_call(self._hold_current)
+        with self._condition:
             return {
                 "command_id": "hold-%s-%s" % (robot_id, generation),
                 "robot_id": robot_id,
@@ -341,18 +395,27 @@ class ProfileRuntimeInstance:
 
     def robot_profile(self, robot_id: str) -> Dict[str, Any]:
         self._check_robot(robot_id)
+        controller = getattr(self._adapter, "controller_name", "JOINT_POSITION")
+        commands = ["control_sequence"] if controller == "OSC_POSE" else [
+            "joint_trajectory", "gripper_command"
+        ]
         return {
             "robot_id": self.robot_id,
             "model": "franka_panda",
+            # Server 用型号、后端和 Profile 精确匹配受管 Bundle；这里必须声明
+            # 实际安装的 SDK 包，不能沿用早期接口示例中的非发行包名称。
+            "backend": "mujoco",
             "kind": "manipulator",
             "coordinate_frame": "world",
-            "sdk_package": "robot-sdk-franka",
+            "sdk_package": "semantic-robot-sdk-franka",
             "backend_profile": self.profile_id,
             "joint_names": list(FRANKA_JOINT_NAMES),
             "end_effectors": ["hand"],
             "grippers": ["hand"],
             "capabilities": {
-                "commands": ["joint_trajectory", "gripper_command"],
+                "commands": commands,
+                "control_period_s": self.control_period_s,
+                "control_mode": controller,
                 "sensors": ["rgb", "depth", "contact", "robot_state"],
                 "frames": ["world", "panda_link0", "panda_hand"],
             },
@@ -447,19 +510,66 @@ class ProfileRuntimeInstance:
             )
 
     def snapshot(self) -> Dict[str, Any]:
-        with self._condition:
-            objects = _scene_objects(self._observation)
-        return {
-            "scene_key": self.scene_key,
-            "instance_id": self.instance_id,
-            "generation": self.generation,
-            "coordinate_frame": "world",
-            "robots": [self.robot_state(self.robot_id)],
-            "objects": objects,
-            "regions": [],
-            "sensors": self.sensor_descriptors(self.robot_id),
-            "observed_at": utc_iso(),
-        }
+        def capture(adapter: Any) -> Dict[str, Any]:
+            if hasattr(adapter, "scene_metadata"):
+                metadata = adapter.scene_metadata()
+            else:
+                metadata = {"objects": _scene_objects(self._observation), "regions": []}
+            # 持物验收需要物体位姿、手指接触及 Robot 状态来自同一物理周期。
+            # 全部在 worker 中复制，不能等 HTTP 线程再分别读取拼成“同一帧”。
+            return {
+                "scene_key": self.scene_key, "instance_id": self.instance_id,
+                "generation": self.generation, "sequence": self.step_count + 1,
+                "sim_time": self.sim_time, "coordinate_frame": "world",
+                "robots": [self.robot_state(self.robot_id)],
+                "objects": metadata["objects"], "regions": metadata["regions"],
+                "contacts": dict(adapter.contact_state()),
+                "evaluation": {"success": bool(adapter.success()),
+                               "metrics": dict(adapter.native_metrics()),
+                               "language": str(getattr(adapter, "language", ""))},
+                "sensors": self.sensor_descriptors(self.robot_id), "observed_at": utc_iso(),
+            }
+
+        # 原生场景读取在仿真线程按检查点执行，不从 HTTP 线程访问 MjData，
+        # 也不把每帧视觉位姿写成语义地图历史。旧 Profile 保留原有观测映射。
+        return self._worker_call(capture)
+
+    def synchronized_observation(self, robot_id: str) -> Tuple[Dict[str, Any], bytes]:
+        """在同一物理周期复制原始 RGB 和状态，不使用两个 HTTP 请求拼接观测。"""
+        self._check_robot(robot_id)
+
+        def capture(adapter: Any) -> Tuple[Dict[str, Any], bytes]:
+            if not hasattr(adapter, "policy_observation"):
+                raise ProfileRuntimeError("当前 Profile 不提供同步策略观测", status_code=422)
+            raw = adapter.policy_observation()
+            images = []
+            chunks = []
+            offset = 0
+            for name in ("agentview", "robot0_eye_in_hand"):
+                value = np.ascontiguousarray(raw[name + "_image"])
+                if value.dtype != np.uint8 or value.ndim != 3 or value.shape[2] != 3:
+                    raise ProfileRuntimeError("策略相机必须提供原始 uint8 RGB")
+                payload = value.tobytes()
+                images.append({
+                    "sensor_id": name + "_rgb", "frame_id": name,
+                    "encoding": "rgb8", "width": value.shape[1], "height": value.shape[0],
+                    "offset": offset, "length": len(payload),
+                })
+                chunks.append(payload)
+                offset += len(payload)
+            with self._condition:
+                metadata = {
+                    "generation": self.generation, "sequence": self.step_count + 1,
+                    "sim_time": self.sim_time, "observed_at": utc_iso(),
+                    "robot_state": self.robot_state(robot_id), "images": images,
+                    "gripper_joint_positions": {
+                        "panda_finger_joint1": float(raw["robot0_gripper_qpos"][0]),
+                        "panda_finger_joint2": float(raw["robot0_gripper_qpos"][1]),
+                    },
+                }
+            return metadata, b"".join(chunks)
+
+        return self._worker_call(capture)
 
     def evaluation(self) -> Dict[str, Any]:
         """在物理 worker 上读取原生评测器，避免 API 线程直接访问环境对象。"""
@@ -570,12 +680,23 @@ class ProfileRuntimeInstance:
             while True:
                 call = None
                 with self._condition:
+                    # 暂停和重置消耗的墙钟时间不属于仿真时间。恢复后重新计时，
+                    # 避免为了追赶旧 deadline 瞬间推进大量空闲物理周期。
+                    if self._restart_clock:
+                        deadline = time.monotonic()
+                        self._restart_clock = False
                     if self._calls:
                         call = self._calls.popleft()
                     elif self._stop_requested:
                         break
                     elif self.state == "paused":
                         self._condition.wait(timeout=0.5)
+                        continue
+                    elif deadline > time.monotonic():
+                        # 等待下个物理周期时允许观测、提交和停止请求唤醒线程。
+                        # sleep 会让每次观测/动作准备额外等待一个控制周期；
+                        # 请求处理仍串行执行，但不改变物理步进的 deadline。
+                        self._condition.wait(timeout=max(0.0, deadline - time.monotonic()))
                         continue
                 if call is not None:
                     try:
@@ -586,9 +707,8 @@ class ProfileRuntimeInstance:
                         call.done.set()
                     continue
                 action = self._next_action(adapter)
-                self._advance_adapter(adapter, action)
+                self._advance_adapter(adapter, action, self._action_command_id)
                 deadline += self.control_period_s
-                time.sleep(max(0.0, deadline - time.monotonic()))
         except BaseException as error:
             with self._condition:
                 self.failure_reason = str(error)
@@ -619,6 +739,7 @@ class ProfileRuntimeInstance:
         exporter = MujocoVisualExporter(
             model,
             data,
+            visible_geom_groups=adapter.visual_geom_groups(),
             source_for_body=lambda body_id: adapter.visual_source_for_body(
                 body_id, object_source_ids
             ),
@@ -642,6 +763,7 @@ class ProfileRuntimeInstance:
 
     def _next_action(self, adapter: Any) -> Any:
         with self._condition:
+            self._action_command_id = self._active_command_id
             command = (
                 self._commands.get(self._active_command_id)
                 if self._active_command_id is not None
@@ -651,6 +773,8 @@ class ProfileRuntimeInstance:
                 return self._hold_action(adapter)
             command["status"] = "running"
             elapsed = self.sim_time - self._active_started_sim_time
+            if command["type"] == "control_sequence":
+                return self._sequence_actions[self._sequence_index]
             if command["type"] == "gripper_command":
                 payload = command["gripper_command"]
                 if self._gripper_opening_m is None:
@@ -672,7 +796,9 @@ class ProfileRuntimeInstance:
             action = adapter.joint_position_action(target, gripper_action=self._gripper_action)
             return action
 
-    def _advance_adapter(self, adapter: Any, action: Any) -> None:
+    def _advance_adapter(
+        self, adapter: Any, action: Any, command_id: Optional[str] = None
+    ) -> None:
         observation, reward, done, _info = adapter.step(action)
         base_pose = adapter.base_pose()
         gripper_opening = adapter.gripper_opening()
@@ -689,27 +815,52 @@ class ProfileRuntimeInstance:
             self.sim_time += self.control_period_s
             self.step_count += 1
             self.updated_at = utc_iso()
-            self._observe_active_command()
+            self._observe_active_command(command_id)
             self._capture_visual_pose_locked()
 
     def _hold_action(self, adapter: Any) -> Any:
         """保持当前实际关节和夹爪控制目标，不生成新的运动。"""
 
+        hold_action = getattr(adapter, "hold_action", None)
+        if hold_action is not None:
+            return hold_action()
         return adapter.joint_position_action(
             dict(self._joint_positions),
             gripper_action=0.0,
         )
 
-    def _observe_active_command(self) -> None:
+    def _observe_active_command(self, command_id: Optional[str] = None) -> None:
         """用刚完成的物理周期观测判断命令是否真正结束。
 
-        本方法只从 worker 已写入的缓存读取状态。轨迹时间到达只意味着最终目标
-        已经发送；只有实际位置连续进入容差，命令才能变成 succeeded。
+        本方法在仿真 worker 内读取本周期缓存，序列结束时也在此线程切换保持。
+        位置轨迹时间到达只意味着最终目标已经发送，仍需实际位置连续进入容差；
+        定时增量序列则按样本周期结束，不以目标到位延长样本的作用时间。
         """
 
         if self._active_command_id is None:
             return
         command = self._commands[self._active_command_id]
+        if command["type"] == "control_sequence":
+            if command_id != self._active_command_id:
+                return
+            # 每个物理控制周期只消费一次，不用浮点时间取整重复位移增量。
+            self._sequence_index += 1
+            command["progress"] = self._sequence_index / len(self._sequence_actions)
+            if self._sequence_index == len(self._sequence_actions):
+                # 此 Profile 的序列是 OSC 末端增量 + 夹爪方向，每个样本只拥有
+                # 一个控制周期。最后一次物理步结束后，在同一仿真线程捕获保持
+                # 位姿，再发布完成状态；不能让推理等待期继续追踪未达到的旧
+                # 增量目标。保持不冻结物理，也不表示机器人速度瞬间为零。
+                # 普通关节位置轨迹仍由下面的到位判定处理，不套用此结束语义。
+                self._hold_current(self._adapter)
+                self._finish_command(command, "succeeded", "控制序列已执行；任务结果另行验证")
+            elif self.sim_time - self._active_started_sim_time >= float(
+                command.get("timeout_seconds", 30.0)
+            ):
+                command["failure_reason"] = "timeout"
+                self._hold_current(self._adapter)
+                self._finish_command(command, "failed", "控制序列超时，剩余动作已清空")
+            return
         elapsed = self.sim_time - self._active_started_sim_time
         if command["type"] == "joint_trajectory":
             points = command["joint_trajectory"]["points"]
@@ -781,6 +932,7 @@ class ProfileRuntimeInstance:
         command["ended_at"] = command["updated_at"]
         if self._active_command_id == command["command_id"]:
             self._active_command_id = None
+            self._sequence_actions = []
 
         # Panda GRIP 输入是方向量；命令终止后必须归零，否则适配器会继续积分，
         # 即使上层状态已经显示 cancelled/failed，夹爪仍会继续运动。
@@ -789,6 +941,8 @@ class ProfileRuntimeInstance:
     def _cancel_active(self, reason: str) -> None:
         if self._active_command_id:
             command = self._commands[self._active_command_id]
+            if command.get("execution_id"):
+                self._cancelled_executions.add(command["execution_id"])
             self._finish_command(command, "cancelled", reason)
 
     def _require_state(self, *states: str) -> None:
@@ -813,6 +967,8 @@ class ProfileRuntimeService:
         self._lock = threading.RLock()
         self._instance: Optional[ProfileRuntimeInstance] = None
         self._requests: Dict[str, Tuple[str, str]] = {}
+        self._catalog: Optional[List[Dict[str, Any]]] = None
+        self._catalog_lock = threading.Lock()
 
     def runtime_info(self) -> Dict[str, Any]:
         with self._lock:
@@ -841,16 +997,16 @@ class ProfileRuntimeService:
                 _scene_descriptor(name, "robosuite", self.profile_id, ["default"])
                 for name in ("Lift", "Stack")
             ]
-        suite = os.getenv("SEMANTIC_LIBERO_SUITE", "libero_spatial")
-        task_id = int(os.getenv("SEMANTIC_LIBERO_TASK_ID", "0"))
-        return [
-            _scene_descriptor(
-                "%s:%s" % (suite, task_id),
-                "libero",
-                self.profile_id,
-                ["init-0"],
-            )
-        ]
+        # 目录只在固定安装的 Runtime 进程内缓存。加载初态文件不持有场景锁，
+        # 因而浏览目录不会阻止当前场景的暂停、停止和物理推进。
+        with self._catalog_lock:
+            if self._catalog is None:
+                if not os.getenv("SEMANTIC_LIBERO_ROOT"):
+                    # 目录由独立场景包在 Framework 展示；引擎空安装也可以就绪。
+                    return []
+                source_root, config_root = _libero_roots()
+                self._catalog = installed_task_catalog(source_root, config_root)
+            return deepcopy(self._catalog)
 
     def start_scene(self, scene_key: str, request: Dict[str, Any]) -> ProfileRuntimeInstance:
         request_id = str(request.get("request_id", "")).strip()
@@ -926,13 +1082,16 @@ def _adapter_factory(
         raise ProfileRuntimeError("LIBERO scene_key 必须为 suite:task_id", status_code=422)
     if not layout.startswith("init-") or not layout[5:].isdigit():
         raise ProfileRuntimeError("LIBERO layout 必须为 init-N", status_code=422)
-    source_root_text = os.getenv("SEMANTIC_LIBERO_ROOT", "").strip()
-    if not source_root_text:
-        raise ProfileRuntimeError("SEMANTIC_LIBERO_ROOT 未配置")
-    source_root = Path(source_root_text).expanduser()
-    if not source_root.is_dir():
-        raise ProfileRuntimeError("SEMANTIC_LIBERO_ROOT 未指向固定 LIBERO 源码")
-    config_root = Path(os.getenv("SEMANTIC_LIBERO_CONFIG_ROOT", ".output/runtime-libero-config"))
+    if request.get("scene_content_root"):
+        source_root = Path(request["scene_content_root"])
+        config_root = Path(os.getenv("SEMANTIC_LIBERO_CONFIG_ROOT", ".output/runtime-libero-config"))  # noqa: E501
+    else:
+        # 兼容已安装的旧 Runtime 配置；新场景走自己的内容引用。
+        source_root, config_root = _libero_roots()
+    # 控制/观测配置随 Runtime Pack 安装，由 Runtime 自己解释。Framework 仅传递
+    # 已校验配置文件的位置，避免启动 LIBERO 必须依赖外部 deployment 脚本导出变量。
+    config_path = os.getenv("SEMANTIC_RUNTIME_CONFIG")
+    settings = json.loads(Path(config_path).read_text()) if config_path else {}
     return lambda: LiberoAdapter(
         source_root=source_root,
         config_root=config_root,
@@ -941,10 +1100,24 @@ def _adapter_factory(
         init_state_id=int(layout[5:]),
         seed=seed,
         camera_names=("agentview", "robot0_eye_in_hand"),
-        width=640,
-        height=480,
+        width=int(os.getenv("SEMANTIC_LIBERO_CAMERA_WIDTH", settings.get("camera_width", 640))),
+        height=int(os.getenv("SEMANTIC_LIBERO_CAMERA_HEIGHT", settings.get("camera_height", 480))),
         horizon=1000000,
+        controller=os.getenv(
+            "SEMANTIC_LIBERO_CONTROLLER", settings.get("controller", "JOINT_POSITION")
+        ),
     )
+
+
+def _libero_roots() -> Tuple[Path, Path]:
+    source_root_text = os.getenv("SEMANTIC_LIBERO_ROOT", "").strip()
+    if not source_root_text:
+        raise ProfileRuntimeError("SEMANTIC_LIBERO_ROOT 未配置")
+    source_root = Path(source_root_text).expanduser()
+    if not source_root.is_dir():
+        raise ProfileRuntimeError("SEMANTIC_LIBERO_ROOT 未指向固定 LIBERO 源码")
+    config_root = Path(os.getenv("SEMANTIC_LIBERO_CONFIG_ROOT", ".output/runtime-libero-config"))
+    return source_root, config_root
 
 
 def _profile_capabilities(profile_id: str) -> Dict[str, Any]:
@@ -982,7 +1155,7 @@ def _validate_command(request: Dict[str, Any]) -> None:
     payload_key = command_type
     present = [
         key
-        for key in ("joint_trajectory", "base_trajectory", "gripper_command")
+        for key in ("joint_trajectory", "base_trajectory", "gripper_command", "control_sequence")
         if request.get(key) is not None
     ]
     if present != [payload_key]:
@@ -1004,7 +1177,7 @@ def _validate_command(request: Dict[str, Any]) -> None:
             if timestamp <= previous or set(positions) != set(FRANKA_JOINT_NAMES):
                 raise ProfileRuntimeError("关节轨迹时间或关节集合无效", status_code=422)
             previous = timestamp
-    else:
+    elif command_type == "gripper_command":
         payload = request["gripper_command"]
         if payload.get("gripper_id") != "hand":
             raise ProfileRuntimeError("Franka gripper_id 必须为 hand", status_code=422)

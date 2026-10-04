@@ -1,0 +1,5 @@
+{
+  "controller": "OSC_POSE",
+  "camera_width": 256,
+  "camera_height": 256
+}

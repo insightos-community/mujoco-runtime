@@ -1,18 +1,3 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """SceneDocument 的 native MuJoCo 校验规则。
 
 规则不依赖 FastAPI 或 Runtime 状态，因此构建、单元测试和未来命令行工具可以
@@ -22,16 +7,8 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import Any
-
-
-def is_relative_asset_key(value: str) -> bool:
-    """Asset identifiers must stay relative under either supported path syntax."""
-    return bool(value) and all(
-        not path.anchor and ".." not in path.parts
-        for path in (PurePosixPath(value), PureWindowsPath(value))
-    )
 
 
 def document_rule_issues(document: Any) -> list[tuple[str | None, str, str]]:
@@ -96,9 +73,6 @@ def asset_file_issues(asset_root: Path, document: Any) -> list[tuple[str | None,
             referenced_by.setdefault(node.asset_id, []).append(node.id)
 
     for asset in document.assets:
-        if not is_relative_asset_key(asset.asset_key):
-            issues.append((None, f"assets.{asset.id}.asset_key", "资产路径越过资产仓"))
-            continue
         try:
             candidate = (root / asset.asset_key).resolve()
             candidate.relative_to(root)

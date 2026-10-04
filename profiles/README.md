@@ -69,7 +69,12 @@ RGB PNG 和 16 位 Depth PNG。中性控制 smoke 不代表任务已经完成。
       --suite libero_spatial --task-id 0 --init-state-id 0 --seed 7 --steps 10 \
       --output-dir .output/profiles/libero-pro
 
-启动时会校验两个源码提交。LIBERO 配置写入本次输出目录，不会修改用户主目录。
+`sources.lock.yaml` 是发布构建和固定基线测试的唯一上游版本来源；升级时更新该锁文件，
+构建工具校验实际源码提交，并把来源版本写入场景包。上面的 checkout 值展示当前基线。
+运行时代码不固定 commit，也不以 commit 相等判断兼容性：源码模式记录实际 Git HEAD，
+场景包模式记录包内 `source_revision`，无 Git 信息的源码归档保留为未知。
+兼容环境由 Runtime Profile 声明，加载时仍检查必要的接口和资产；换版本需重新验证。
+LIBERO 配置写入本次输出目录，不会修改用户主目录。
 LIBERO-Pro 的 Python 3.10 注解通过加载兼容层延迟解析，上游源码本身保持不变。
 
 ## 输出与判定

@@ -15,13 +15,14 @@ entries:
         published: true
         robot_models: [franka_panda]
         variants:
-          - {variant_id: init-state-0, name: Init State 0, kind: init_state}
-          - {variant_id: libero-pro-environment, name: LIBERO-Pro Environment, kind: evaluation_config}
+          - {variant_id: init-0, name: 初态 0, kind: init_state}
+          - {variant_id: init-1, name: 初态 1, kind: init_state}
+          - {variant_id: init-2, name: 初态 2, kind: init_state}
         capabilities: [viewer, rgb, depth, contact, evaluation]
         authoring: {mode: none}
         evaluation:
           provider: libero
           evaluation_kind: task_success
           metrics: [success, reward]
-          supports_comparison: true
-          available_variants: [init-state-0, libero-pro-environment]
+          supports_comparison: false
+          available_variants: [base]

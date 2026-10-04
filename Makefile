@@ -1,24 +1,10 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 .PHONY: install lint test test-contracts test-native test-profiles test-robosuite-real test-libero-real test-libero-pro-real build ci runtime-pack-native runtime-pack-robosuite runtime-pack-libero runtime-packs run run-robosuite run-libero demo
 
 PYTEST_ENV = PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 
-LIBERO_REVISION = 8f1084e3132a39270c3a13ebe37270a43ece2a01
-LIBERO_PRO_REVISION = 0bcf73621c789ffd6ed8858467a89df9ca94fd6b
+# 专项验证与发布构建使用同一来源锁，更新版本只改 sources.lock.yaml。
+LIBERO_REVISION = $(shell uv run --project profiles/common --frozen python -c "import yaml; print(yaml.safe_load(open('profiles/sources.lock.yaml'))['sources']['libero']['commit'])")
+LIBERO_PRO_REVISION = $(shell uv run --project profiles/common --frozen python -c "import yaml; print(yaml.safe_load(open('profiles/sources.lock.yaml'))['sources']['libero_pro']['commit'])")
 
 install:
 	uv sync --frozen --extra dev

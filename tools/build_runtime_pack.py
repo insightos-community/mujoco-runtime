@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """从固定源码 Tag 构建不依赖源码目录的 Runtime Pack。
 
 脚本只调用参数数组形式的 uv/pip/tar，不执行 shell。每个 Pack 包含项目 Wheel、
@@ -26,9 +11,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -129,8 +116,8 @@ def profile_table() -> dict[str, PackProfile]:
                 "gpu": "optional",
             },
             content_requirements={"franka_model": {"required": True}},
-            wheel_projects=(ROOT / "profiles" / "common",),
-            omit_packages=("semantic-sim-profiles",),
+            wheel_projects=(ROOT / "profiles" / "common", ROOT / "packages" / "mujoco-visuals"),
+            omit_packages=("semantic-sim-profiles", "semantic-mujoco-visuals"),
         ),
         "libero-robosuite-1.4": PackProfile(
             pack_id="libero-robosuite-1.4",
@@ -154,6 +141,7 @@ def profile_table() -> dict[str, PackProfile]:
                     **common_capabilities,
                     "editable_scene": False,
                     "native_evaluator": True,
+                    "scene_previews": True,
                     "robot_models": ["franka_panda"],
                 },
             },
@@ -162,23 +150,31 @@ def profile_table() -> dict[str, PackProfile]:
                 "renderer": "egl",
                 "gpu": "optional",
             },
-            content_requirements={
-                "franka_model": {"required": True},
-                "libero_source": {
-                    "required": True,
-                    "revision": "8f1084e3132a39270c3a13ebe37270a43ece2a01",
-                    "license_confirmation": "LIBERO",
-                },
-                "libero_pro_source": {
-                    "required": True,
-                    "revision": "0bcf73621c789ffd6ed8858467a89df9ca94fd6b",
-                    "license_confirmation": "LIBERO-Pro",
-                },
-            },
-            wheel_projects=(ROOT / "profiles" / "common",),
-            omit_packages=("semantic-sim-profiles",),
+            content_requirements={},
+            wheel_projects=(ROOT / "profiles" / "common", ROOT / "packages" / "mujoco-visuals"),
+            omit_packages=("semantic-sim-profiles", "semantic-mujoco-visuals"),
         ),
     }
+
+
+def _curl_wheel_dir() -> Path:
+    """定位共享的 curl Wheel 下载器（semantic-framework/scripts）。
+
+    各仓库在不同工作区布局下位置不一，按 $SEMANTIC、ROOT 各级父目录依次查找。
+    """
+    semantic = os.environ.get("SEMANTIC", "").strip()
+    candidates = []
+    if semantic:
+        candidates.append(Path(semantic) / "semantic-framework/scripts")
+    for parent in [ROOT, *ROOT.parents]:
+        candidates.append(parent / "semantic-framework/scripts")
+    for candidate in candidates:
+        if (candidate / "curl_wheel.py").is_file():
+            return candidate
+    raise FileNotFoundError(
+        "找不到 semantic-framework/scripts/curl_wheel.py；"
+        "请把各仓库放在同一工作区下，或 export SEMANTIC=<工作区根目录>"
+    )
 
 
 def run(*arguments: str, cwd: Path = ROOT, stdout: Path | None = None) -> None:
@@ -257,7 +253,7 @@ def export_and_build_dependencies(profile: PackProfile, stage: Path) -> tuple[Pa
         "--no-hashes",
         "--no-emit-project",
         "--format",
-        "requirements-txt",
+        "requirements.txt",
         "--output-file",
         str(lock),
     ]
@@ -266,7 +262,7 @@ def export_and_build_dependencies(profile: PackProfile, stage: Path) -> tuple[Pa
     run(*command)
     wheelhouse = stage / "wheelhouse"
     wheelhouse.mkdir()
-    run(
+    command = [
         "uv",
         "run",
         "--isolated",
@@ -283,7 +279,52 @@ def export_and_build_dependencies(profile: PackProfile, stage: Path) -> tuple[Pa
         str(wheelhouse),
         "--requirement",
         str(lock),
-    )
+    ]
+    # 修改目录或 smoke 配置时复用既有锁定 Wheel，构建不重复下载仿真依赖。
+    # 种子来源：显式 SEMANTIC_RUNTIME_WHEELHOUSE，或约定共享路径下的 wheelhouse。
+    seeds = []
+    if seed := os.environ.get("SEMANTIC_RUNTIME_WHEELHOUSE"):
+        seeds.append(seed)
+    env_wh = os.environ.get("SEMANTIC_WHEELHOUSE")
+    for base in ([env_wh] if env_wh is not None else ["/data/wheelhouse"]):
+        if not base or not os.path.isdir(base):
+            continue
+        if any(name.endswith(".whl") for name in os.listdir(base)):
+            seeds.append(base)
+        for entry in sorted(os.listdir(base)):
+            sub = os.path.join(base, entry)
+            if os.path.isdir(sub) and any(name.endswith(".whl") for name in os.listdir(sub)):
+                seeds.append(sub)
+    if seeds:
+        command.append("--no-index")
+        for seed in seeds:
+            command.extend(("--find-links", seed))
+        run(*command)
+    else:
+        # 无缓存时先用 curl 下载器取 PyPI 上的 Wheel：实测 pip 在 GB 级文件上会连接
+        # 僵死（317 MB 的 cublas 卡 25 分钟），curl 同文件 28 秒完成；剩余源码包由
+        # 下面的 pip 兜底。
+        curl_collected = False
+        try:
+            sys.path.insert(0, str(_curl_wheel_dir()))
+            from curl_wheel import collect as curl_collect
+            index = os.environ.get("UV_DEFAULT_INDEX") or os.environ.get("PIP_INDEX_URL") \
+                or "https://mirrors.aliyun.com/pypi/simple"
+            # 进度实时可见（日志重定向时 Python 默认块缓冲会吞掉输出）。
+            count = curl_collect(Path(lock), wheelhouse, index, [], python=profile.python,
+                                 progress=lambda message: print(message, flush=True))
+            curl_collected = count > 0
+        except Exception as error:
+            print(f"[warn] curl 下载器不可用（{error}），改用 pip 收集", flush=True)
+        command.extend(("--find-links", str(wheelhouse)))
+        if curl_collected:
+            # curl 已取到 PyPI 上的全部 Wheel，剩余（源码包/本地产品 Wheel）也都在
+            # find-links 里；加 --no-index 避免 pip 再去访问索引并重新下载大文件。
+            command.append("--no-index")
+        else:
+            # 抗僵死兜底：pip 需联网，仍加超时避免无限等待。
+            command.extend(("--timeout", "60", "--retries", "5"))
+        run(*command)
     dependencies = sorted(wheelhouse.iterdir())
     if not dependencies or any(not path.is_file() for path in dependencies):
         raise RuntimeError("CI 生成的离线 Wheelhouse 为空或包含非文件")
@@ -341,11 +382,16 @@ def stamp_catalog_version(catalog: Path, version: str) -> None:
     )
 
 
-def build(profile: PackProfile, version: str, output: Path) -> Path:
+def build(profile: PackProfile, version: str, output: Path, upstream_source: Path | None = None) -> Path:
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="semantic-runtime-pack-") as temporary:
         stage = Path(temporary)
         wheels = build_wheels(profile, stage, version)
+        if profile.runner == "libero-robosuite-1.4":
+            from libero_packages import build_loader
+            if upstream_source is None:
+                raise ValueError("构建 LIBERO Runtime 需要 --upstream-source；安装时无需此目录")
+            wheels.append(build_loader(upstream_source.resolve(), stage / "wheels"))
         lock, dependencies = export_and_build_dependencies(profile, stage)
         catalog, resources, smoke, verification = copy_metadata(profile, version, stage)
         license_files = sorted((stage / "licenses").iterdir())
@@ -369,6 +415,18 @@ def build(profile: PackProfile, version: str, output: Path) -> Path:
             "smoke_request": file_record(stage, smoke),
             "content_requirements": profile.content_requirements,
         }
+        # 新的 LIBERO 引擎包只交付代码与锁定环境；原生任务单独由场景包登记。
+        # 其他 Profile 暂时保留原已发布包结构，避免影响现有拆码垛安装。
+        if profile.runner == "libero-robosuite-1.4":
+            for key in ("scene_catalog", "scene_resources", "smoke_scene_key", "smoke_request"):
+                manifest.pop(key)
+            shutil.rmtree(stage / "catalog")
+            shutil.rmtree(stage / "smoke")
+        settings = ROOT / "runtime-packs" / profile.profile["runtime_profile_id"] / "runtime-settings.json"
+        if settings.is_file():
+            target = stage / "runtime-settings.json"
+            shutil.copy2(settings, target)
+            manifest["settings"] = file_record(stage, target)
         (stage / "runtime-pack.yaml").write_text(
             yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False), encoding="utf-8"
         )
@@ -385,12 +443,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", choices=sorted(profile_table()), required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--upstream-source", type=Path, help="构建期的固定 LIBERO 源码；不会作为安装依赖")
     parser.add_argument("--output", type=Path, default=ROOT / "dist-runtime-packs")
     arguments = parser.parse_args()
     if not VERSION_RE.fullmatch(arguments.version):
         parser.error("--version 必须是 SemVer（例如 0.4.0 或 0.4.0-rc.1）")
     archive = build(
-        profile_table()[arguments.profile], arguments.version, arguments.output.resolve()
+        profile_table()[arguments.profile], arguments.version, arguments.output.resolve(), arguments.upstream_source
     )
     print(archive)
 

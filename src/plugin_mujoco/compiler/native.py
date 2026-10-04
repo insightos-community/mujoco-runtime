@@ -1,18 +1,3 @@
-# Copyright 2026 InsightOS
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """把 Studio SceneDocument 编译为可注册的 MuJoCo 场景定义。"""
 
 from __future__ import annotations
@@ -26,7 +11,6 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from plugin_mujoco.compiler.rules import is_relative_asset_key
 from plugin_mujoco.models import SceneDescriptor, StrictModel
 from plugin_mujoco.scene.catalog import AssetSpec, RobotSpec, SceneDefinition, SensorSpec
 
@@ -139,7 +123,8 @@ def validate_scene_document(document: SceneDocument) -> list[AuthoringIssue]:
         issues.append(AuthoringIssue(level="error", field="name", message="场景名称不能为空"))
     assets: dict[str, DocumentAsset] = {}
     for asset in document.assets:
-        if not is_relative_asset_key(asset.asset_key):
+        path = Path(asset.asset_key)
+        if path.is_absolute() or ".." in path.parts:
             issues.append(
                 AuthoringIssue(
                     level="error",
