@@ -45,7 +45,7 @@ def test_real_mujoco_loads_each_layout_and_produces_snapshot(layout):
         pytest.skip("MUJOCO_ASSET_ROOT 未设置")
     root = Path(raw_root)
     manager = RuntimeManager(
-        Settings(asset_root=root, backend="mujoco", render_backend="egl", realtime=True)
+        Settings(asset_root=root, backend="mujoco", realtime=True)
     )
     try:
         scene = manager.start(
@@ -55,7 +55,7 @@ def test_real_mujoco_loads_each_layout_and_produces_snapshot(layout):
                 layout=layout,
                 seed=1,
                 headless=True,
-                render_backend="egl",
+                render_backend="auto",
             ),
         )
         ready = manager.wait_ready(scene.instance_id, timeout=30)

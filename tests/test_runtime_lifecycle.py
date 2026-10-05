@@ -137,6 +137,6 @@ def test_runtime_rejects_render_backend_switch(manager):
             ),
         )
     assert captured.value.details == {
-        "configured": "egl",
+        "configured": manager.settings.render_backend,
         "requested": "osmesa",
     }
