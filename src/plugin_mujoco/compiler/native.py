@@ -14,7 +14,7 @@ from pydantic import Field
 from plugin_mujoco.models import SceneDescriptor, StrictModel
 from plugin_mujoco.scene.catalog import AssetSpec, RobotSpec, SceneDefinition, SensorSpec
 
-from .rules import asset_file_issues, document_rule_issues
+from .rules import asset_file_issues, document_rule_issues, is_relative_asset_key
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
@@ -123,8 +123,7 @@ def validate_scene_document(document: SceneDocument) -> list[AuthoringIssue]:
         issues.append(AuthoringIssue(level="error", field="name", message="场景名称不能为空"))
     assets: dict[str, DocumentAsset] = {}
     for asset in document.assets:
-        path = Path(asset.asset_key)
-        if path.is_absolute() or ".." in path.parts:
+        if not is_relative_asset_key(asset.asset_key):
             issues.append(
                 AuthoringIssue(
                     level="error",
