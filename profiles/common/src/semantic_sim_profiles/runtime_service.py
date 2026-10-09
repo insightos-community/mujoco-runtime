@@ -43,10 +43,13 @@ from semantic_sim_profiles.robosuite import FRANKA_JOINT_NAMES, RobosuiteAdapter
 
 
 def utc_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 
 class ProfileRuntimeError(RuntimeError):
+    """Domain error of the profile runtime, carrying an HTTP status code (default 409)."""
+
     def __init__(self, message: str, *, status_code: int = 409):
         super().__init__(message)
         self.message = message
@@ -140,9 +143,14 @@ class ProfileRuntimeInstance:
         )
 
     def start(self) -> None:
+        """Start the physics worker thread; the environment is created inside it."""
         self._thread.start()
 
     def wait_ready(self, timeout: float = 30.0) -> Dict[str, Any]:
+        """Block until the instance leaves the starting state, then return its view.
+
+        Raises ProfileRuntimeError if the instance is still starting after ``timeout``.
+        """
         deadline = time.monotonic() + timeout
         with self._condition:
             while self.state == "starting" and time.monotonic() < deadline:
@@ -152,6 +160,7 @@ class ProfileRuntimeInstance:
             return self.view()
 
     def view(self) -> Dict[str, Any]:
+        """Return a thread-safe snapshot of the public scene-instance state."""
         with self._condition:
             return {
                 "instance_id": self.instance_id,
@@ -174,6 +183,11 @@ class ProfileRuntimeInstance:
             }
 
     def pause(self) -> Dict[str, Any]:
+        """Pause a running instance, cancelling any active robot command.
+
+        Returns after the in-flight physics cycle has finished, so the reported
+        sim_time is stable. Idempotent when already paused.
+        """
         with self._condition:
             if self.state == "paused":
                 return self.view()
@@ -189,6 +203,7 @@ class ProfileRuntimeInstance:
         return self.view()
 
     def resume(self) -> Dict[str, Any]:
+        """Resume a paused instance, restarting the control clock from now."""
         with self._condition:
             if self.state == "running":
                 return self.view()
@@ -200,6 +215,11 @@ class ProfileRuntimeInstance:
             return self.view()
 
     def step_once(self, steps: int) -> Dict[str, Any]:
+        """Advance a paused instance by ``steps`` physics cycles (1 to 1000).
+
+        Only allowed while paused and with no active robot command; each cycle
+        applies the hold action so the robot stays in place.
+        """
         if steps < 1 or steps > 1000:
             raise ProfileRuntimeError("steps 必须在 1 到 1000 之间", status_code=422)
         with self._condition:
@@ -215,6 +235,13 @@ class ProfileRuntimeInstance:
         return self.view()
 
     def reset(self) -> Dict[str, Any]:
+        """Hard-reset the environment to its initial state with the request seed.
+
+        Rebuilds the underlying model/data, increments the generation, clears
+        command and cancellation state, and atomically republishes the viewer
+        scene so geometry, cameras and pose stream match the new physics world.
+        Requires a running or paused instance with no active robot command.
+        """
         with self._condition:
             self._require_state("running", "paused")
             if self._active_command_id:
@@ -259,6 +286,11 @@ class ProfileRuntimeInstance:
         return self.view()
 
     def stop(self, timeout: float = 10.0) -> Dict[str, Any]:
+        """Stop the worker thread and release the environment.
+
+        Idempotent when already stopped. Raises ProfileRuntimeError if the
+        worker does not exit within ``timeout`` seconds.
+        """
         with self._condition:
             if self.state == "stopped":
                 return self.view()
@@ -280,6 +312,14 @@ class ProfileRuntimeInstance:
         return self.view()
 
     def submit_command(self, robot_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and accept a robot command for execution on the physics worker.
+
+        Accepts joint_trajectory, gripper_command and control_sequence requests
+        whose scene_generation matches the current generation. Submission is
+        idempotent per command_id: repeating an identical request returns the
+        stored command, while a conflicting payload or a second active command
+        is rejected.
+        """
         self._check_robot(robot_id)
         command_id = str(request.get("command_id", "")).strip()
         if not command_id:
@@ -344,6 +384,7 @@ class ProfileRuntimeInstance:
             return dict(command)
 
     def command(self, robot_id: str, command_id: str) -> Dict[str, Any]:
+        """Return the stored status of a command, or raise 404 if unknown."""
         self._check_robot(robot_id)
         with self._condition:
             command = self._commands.get(command_id)
@@ -352,6 +393,11 @@ class ProfileRuntimeInstance:
             return dict(command)
 
     def stop_command(self, robot_id: str, command_id: str) -> Dict[str, Any]:
+        """Cancel a command that has not reached a terminal state.
+
+        Waits for the in-flight physics cycle, after which the worker holds the
+        robot at its current position. Terminal commands are returned unchanged.
+        """
         self._check_robot(robot_id)
         with self._condition:
             command = self._commands.get(command_id)
@@ -370,6 +416,11 @@ class ProfileRuntimeInstance:
         return result
 
     def cancel_execution(self, robot_id: str, execution_id: str, generation: int) -> None:
+        """Cancel a control-sequence execution and reject any late samples of it.
+
+        The generation must match the current one. A cancellation arriving for
+        a stale execution that no longer owns the robot is ignored.
+        """
         self._check_robot(robot_id)
         with self._condition:
             if generation != self.generation or not execution_id:
@@ -390,6 +441,11 @@ class ProfileRuntimeInstance:
             hold_current()
 
     def hold(self, robot_id: str, generation: int) -> Dict[str, Any]:
+        """Cancel any active command and hold the robot at its current pose.
+
+        Returns a succeeded hold-operation result; the generation must match the
+        current scene generation.
+        """
         self._check_robot(robot_id)
         if generation != self.generation:
             raise ProfileRuntimeError("hold generation 已失效")
@@ -409,6 +465,12 @@ class ProfileRuntimeInstance:
             }
 
     def robot_profile(self, robot_id: str) -> Dict[str, Any]:
+        """Return the public Franka robot descriptor and its current capabilities.
+
+        The accepted command types depend on the deployed controller: OSC_POSE
+        deployments accept control_sequence, JOINT_POSITION deployments accept
+        joint_trajectory and gripper_command.
+        """
         self._check_robot(robot_id)
         controller = getattr(self._adapter, "controller_name", "JOINT_POSITION")
         commands = ["control_sequence"] if controller == "OSC_POSE" else [
@@ -437,6 +499,12 @@ class ProfileRuntimeInstance:
         }
 
     def robot_state(self, robot_id: str) -> Dict[str, Any]:
+        """Return the latest cached robot state for the current generation.
+
+        Reads only worker-published copies; API threads never touch the
+        underlying robosuite/MuJoCo objects. Raises 503 until the first
+        observation has been captured.
+        """
         self._check_robot(robot_id)
         with self._condition:
             eef_position = _vector(self._observation.get("robot0_eef_pos"), 3, 0.0)
@@ -473,6 +541,7 @@ class ProfileRuntimeInstance:
             }
 
     def sensor_descriptors(self, robot_id: str) -> List[Dict[str, Any]]:
+        """List rgb/depth sensors found in the current observation, plus contact."""
         self._check_robot(robot_id)
         result = []
         for sensor_id, observation_key, kind in _sensor_bindings(self._observation):
@@ -505,6 +574,10 @@ class ProfileRuntimeInstance:
         return result
 
     def sensor_payload(self, robot_id: str, sensor_id: str) -> Tuple[str, Any, int]:
+        """Return (kind, value, sequence) for a sensor from the cached observation.
+
+        Values are copied under the state lock; unknown sensor ids raise 404.
+        """
         self._check_robot(robot_id)
         with self._condition:
             if sensor_id == "robot0_contact":
@@ -525,6 +598,11 @@ class ProfileRuntimeInstance:
             )
 
     def snapshot(self) -> Dict[str, Any]:
+        """Capture a scene snapshot synchronized to a single physics cycle.
+
+        Object poses, contacts, robot state and evaluation evidence are all read
+        on the worker thread so they belong to the same simulated instant.
+        """
         def capture(adapter: Any) -> Dict[str, Any]:
             if hasattr(adapter, "scene_metadata"):
                 metadata = adapter.scene_metadata()
@@ -611,6 +689,10 @@ class ProfileRuntimeInstance:
             }
 
     def viewer_scene(self) -> Dict[str, Any]:
+        """Return the viewer scene descriptor with content and pose-stream URLs.
+
+        Raises 503 until the first visual export has completed.
+        """
         with self._condition:
             if not self._visual_revision:
                 raise ProfileRuntimeError("Viewer Scene 尚未就绪", status_code=503)
@@ -634,6 +716,7 @@ class ProfileRuntimeInstance:
             }
 
     def viewer_scene_content(self) -> Tuple[bytes, str]:
+        """Return the exported GLB scene bytes and their revision hash."""
         with self._condition:
             if not self._visual_content:
                 raise ProfileRuntimeError("Viewer Scene 尚未就绪", status_code=503)
@@ -642,6 +725,12 @@ class ProfileRuntimeInstance:
     def scene_pose_frame(
         self, after_sequence: int = 0, timeout: float = 2.0
     ) -> Tuple[Dict[str, Any], bytes]:
+        """Long-poll for a pose frame newer than ``after_sequence``.
+
+        Returns (metadata, float32 xyz+xyzw payload) for the latest published
+        frame; raises 503 if no frame has been published at all, and returns
+        the current frame when ``timeout`` expires without a newer one.
+        """
         deadline = time.monotonic() + timeout
         with self._condition:
             while self._pose_sequence <= after_sequence and not self._stop_requested:
@@ -986,6 +1075,7 @@ class ProfileRuntimeService:
         self._catalog_lock = threading.Lock()
 
     def runtime_info(self) -> Dict[str, Any]:
+        """Return runtime identity, lifecycle state and declared capabilities."""
         with self._lock:
             active = self._instance
             active_id = active.instance_id if active and active.state != "stopped" else None
@@ -1007,6 +1097,11 @@ class ProfileRuntimeService:
             }
 
     def scenes(self) -> List[Dict[str, Any]]:
+        """List the scene descriptors this profile can start.
+
+        robosuite exposes the fixed Lift/Stack scenes; the LIBERO catalog is
+        read once from the installed task files and cached for the process.
+        """
         if self.profile_id == "robosuite-1.5":
             return [
                 _scene_descriptor(name, "robosuite", self.profile_id, ["default"])
@@ -1024,6 +1119,12 @@ class ProfileRuntimeService:
             return deepcopy(self._catalog)
 
     def start_scene(self, scene_key: str, request: Dict[str, Any]) -> ProfileRuntimeInstance:
+        """Create and start the single active scene instance.
+
+        Submission is idempotent per request_id: an identical repeated request
+        returns the existing instance, while a conflicting one is rejected.
+        Only one non-stopped instance may exist at a time.
+        """
         request_id = str(request.get("request_id", "")).strip()
         if not request_id:
             raise ProfileRuntimeError("request_id 不能为空", status_code=422)
@@ -1056,18 +1157,21 @@ class ProfileRuntimeService:
             return instance
 
     def instance(self, instance_id: str) -> ProfileRuntimeInstance:
+        """Return the current instance if its id matches, else raise 404."""
         with self._lock:
             if self._instance is None or self._instance.instance_id != instance_id:
                 raise ProfileRuntimeError("场景实例不存在: " + instance_id, status_code=404)
             return self._instance
 
     def active(self) -> ProfileRuntimeInstance:
+        """Return the current instance unless it is stopped or failed (404)."""
         with self._lock:
             if self._instance is None or self._instance.state in {"stopped", "failed"}:
                 raise ProfileRuntimeError("当前没有活动场景", status_code=404)
             return self._instance
 
     def shutdown(self) -> None:
+        """Stop the active instance, if any, and wait for its worker to exit."""
         with self._lock:
             instance = self._instance
         if instance and instance.state != "stopped":

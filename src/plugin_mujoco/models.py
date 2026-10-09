@@ -25,14 +25,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def utc_now() -> datetime:
+    """Return the current UTC time as a timezone-aware datetime."""
     return datetime.now(timezone.utc)
 
 
 class StrictModel(BaseModel):
+    """Base model that rejects unknown fields."""
+
     model_config = ConfigDict(extra="forbid")
 
 
 class SceneState(str, Enum):
+    """Lifecycle states of a scene instance."""
     STOPPED = "stopped"
     STARTING = "starting"
     RUNNING = "running"
@@ -43,6 +47,7 @@ class SceneState(str, Enum):
 
 
 class CommandState(str, Enum):
+    """Lifecycle states of a robot command."""
     ACCEPTED = "accepted"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -67,6 +72,7 @@ class Pose(StrictModel):
 
 
 class SceneStartRequest(StrictModel):
+    """Request to start a scene instance; request_id makes starts idempotent."""
     request_id: str = Field(min_length=1, max_length=128)
     runtime_profile_id: str = "native-mujoco"
     runtime_bundle_id: str | None = None
@@ -77,6 +83,7 @@ class SceneStartRequest(StrictModel):
 
 
 class SceneDescriptor(StrictModel):
+    """Public description of an available scene and its layouts."""
     scene_key: str
     name: str
     scene_kind: str
@@ -87,6 +94,7 @@ class SceneDescriptor(StrictModel):
 
 
 class SceneInstance(StrictModel):
+    """Public view of a scene instance and its lifecycle state."""
     instance_id: str
     scene_key: str
     layout: str
@@ -139,10 +147,12 @@ class RuntimeProfile(StrictModel):
 
     @property
     def profile_id(self) -> str:
+        """Alias for ``runtime_profile_id``."""
         return self.runtime_profile_id
 
 
 class RuntimeInfo(StrictModel):
+    """Identity, state and capabilities of the runtime process."""
     runtime_id: str = "plugin-mujoco"
     runtime_profile_id: str = "native-mujoco"
     state: Literal["ready", "busy", "failed"]
@@ -177,10 +187,12 @@ class SceneEvaluation(StrictModel):
 
 
 class SceneStepRequest(StrictModel):
+    """Request to advance a paused scene by a bounded number of steps."""
     steps: int = Field(default=1, ge=1, le=1000)
 
 
 class RobotCapability(StrictModel):
+    """Command types, sensors and coordinate frames a robot supports."""
     commands: list[Literal["joint_trajectory", "base_trajectory", "gripper_command"]]
     sensors: list[str]
     frames: list[str]
@@ -228,6 +240,7 @@ RobotProfile = VirtualRobotDescriptor
 
 
 class JointState(StrictModel):
+    """Measured joint position, velocity and optional effort."""
     position: float
     velocity: float
     effort: float | None = None
@@ -255,6 +268,7 @@ class GripperState(StrictModel):
 
 
 class RobotState(StrictModel):
+    """Latest measured state of a robot for one scene generation."""
     robot_id: str
     generation: int
     observed_at: datetime
@@ -279,6 +293,7 @@ class TrajectoryPoint(StrictModel):
 
 
 class JointTrajectory(StrictModel):
+    """Timed joint-space trajectory with optional contact-stop conditions."""
     resources: list[str] = Field(min_length=1)
     frame_id: str = Field(min_length=1, max_length=128)
     points: list[TrajectoryPoint] = Field(min_length=1)
@@ -302,6 +317,7 @@ class JointTrajectory(StrictModel):
 
 
 class BaseTrajectory(StrictModel):
+    """Timed planar base trajectory; every point carries exactly x, y and yaw."""
     frame_id: str = Field(min_length=1, max_length=128)
     points: list[TrajectoryPoint] = Field(min_length=1)
 
@@ -315,6 +331,7 @@ class BaseTrajectory(StrictModel):
 
 
 class GripperCommand(StrictModel):
+    """Target opening, effort limit and contact behavior for one gripper."""
     gripper_id: str = Field(min_length=1, max_length=64)
     position: float = Field(ge=0.0)
     max_effort: float = Field(default=0.0, ge=0.0)
@@ -382,6 +399,7 @@ class RobotCommandRequest(StrictModel):
 
     @property
     def coordinate_frame(self) -> str:
+        """Frame the command's targets are expressed in."""
         if self.joint_trajectory is not None:
             return self.joint_trajectory.frame_id
         if self.base_trajectory is not None:
@@ -390,6 +408,7 @@ class RobotCommandRequest(StrictModel):
 
     @property
     def resources(self) -> list[str]:
+        """Resource identifiers this command controls."""
         if self.joint_trajectory is not None:
             return list(self.joint_trajectory.resources)
         if self.base_trajectory is not None:
@@ -399,6 +418,7 @@ class RobotCommandRequest(StrictModel):
 
 
 class RobotCommand(RobotCommandRequest):
+    """A validated robot command plus its server-side execution status."""
     robot_id: str
     status: CommandState
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -436,10 +456,12 @@ class RobotCommandStatus(StrictModel):
 
 
 class RobotHoldRequest(StrictModel):
+    """Request to hold a robot at its current pose for one scene generation."""
     scene_generation: int = Field(ge=1)
 
 
 class RobotOperationResult(StrictModel):
+    """Result of a robot hold operation."""
     command_id: str
     robot_id: str
     scene_generation: int
@@ -452,6 +474,7 @@ class RobotOperationResult(StrictModel):
 
 
 class SensorDescriptor(StrictModel):
+    """Public description of one sensor stream of a robot."""
     sensor_id: str
     robot_id: str
     kind: Literal["rgb", "depth", "contact"]
@@ -478,6 +501,7 @@ class SensorDescriptor(StrictModel):
 
 
 class SensorFrame(StrictModel):
+    """Metadata and optional inline data of one sensor frame."""
     sensor_id: str
     kind: str
     observed_at: datetime
@@ -506,6 +530,7 @@ class SnapshotRobotState(RobotState):
 
 
 class SceneObject(StrictModel):
+    """An object in a scene snapshot, with pose and optional visual reference."""
     source_id: str
     category: str
     name: str
@@ -516,6 +541,7 @@ class SceneObject(StrictModel):
 
 
 class SceneRegion(StrictModel):
+    """A named region in a scene snapshot, with pose and free-form properties."""
     source_id: str
     name: str
     pose: Pose
@@ -525,6 +551,7 @@ class SceneRegion(StrictModel):
 
 
 class SceneSnapshot(StrictModel):
+    """Consistent snapshot of robots, objects, regions and sensors of a scene."""
     scene_key: str
     instance_id: str
     generation: int
@@ -537,6 +564,7 @@ class SceneSnapshot(StrictModel):
 
 
 class ErrorBody(StrictModel):
+    """Structured error payload returned by the API."""
     code: str
     message: str
     details: dict[str, Any] = Field(default_factory=dict)

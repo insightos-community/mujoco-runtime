@@ -29,6 +29,11 @@ app = create_app(settings)
 
 
 def run() -> None:
+    """Serve the runtime app with uvicorn.
+
+    On Windows the server is wrapped in the stop-endpoint helper so the
+    process can be shut down remotely; other platforms use uvicorn.run.
+    """
     if sys.platform != "win32":
         uvicorn.run(app, host=settings.host, port=settings.port)
         return

@@ -29,6 +29,7 @@ from semantic_sim_profiles.runner import run_episode
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser with robosuite, libero and libero-pro subcommands."""
     parser = argparse.ArgumentParser(description="Semantic MuJoCo benchmark profile")
     subparsers = parser.add_subparsers(dest="profile", required=True)
 
@@ -75,6 +76,12 @@ def _libero_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def main() -> None:
+    """Run the selected benchmark profile and print its report as JSON.
+
+    libero-pro additionally generates a perturbed BDDL, runs a second episode
+    against it, and writes a comparison.json next to the episode reports.
+    Exits with status 1 when an episode fails.
+    """
     args = build_parser().parse_args()
     cameras = tuple(args.camera_names or ["agentview", "robot0_eye_in_hand"])
     if args.profile == "robosuite":

@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 @dataclass(frozen=True)
 class ProfileRunRequest:
+    """Immutable description of one benchmark episode to execute."""
     profile: str
     environment: str
     seed: int = 0
@@ -40,6 +41,7 @@ class ProfileRunRequest:
 
 @dataclass
 class EpisodeReport:
+    """Outcome and evidence of a finished (or failed) episode run."""
     profile: str
     environment: str
     seed: int
@@ -57,11 +59,13 @@ class EpisodeReport:
     failure_reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        """Return the report as a JSON-serializable dict."""
         return asdict(self)
 
 
 @dataclass
 class ComparisonReport:
+    """Side-by-side episode reports of a base and a perturbed LIBERO-Pro run."""
     suite: str
     task_id: int
     init_state_id: int
@@ -71,4 +75,5 @@ class ComparisonReport:
     differences: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Return the comparison as a JSON-serializable dict."""
         return asdict(self)

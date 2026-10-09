@@ -92,6 +92,14 @@ def _benchmark_catalog(benchmarks: Dict[str, Any], revision: Optional[str]) -> L
 
 
 class LiberoAdapter:
+    """Run one LIBERO task offscreen and expose it through the profile adapter surface.
+
+    Loads the task from an installed LIBERO source tree or a published scene
+    content package, builds an OffScreenRenderEnv with the requested cameras
+    and controller (JOINT_POSITION or OSC_POSE), and optionally restores one
+    of the benchmark's stored initial states on reset.
+    """
+
     def __init__(
         self,
         *,
@@ -160,9 +168,16 @@ class LiberoAdapter:
 
     @property
     def language(self) -> str:
+        """Natural-language instruction of the loaded task."""
         return self._language
 
     def reset(self, seed: int) -> Dict[str, Any]:
+        """Reset the environment and restore the configured initial state.
+
+        Also captures the current pose as the controller hold target, so the
+        first idle cycles keep the selected initial state instead of drifting
+        towards a stale goal. Returns the normalized observation.
+        """
         seeder = getattr(self._env, "seed", None)
         if callable(seeder):
             seeder(seed)
@@ -276,6 +291,7 @@ class LiberoAdapter:
         return self.end_effector_delta_action(physical[:3], physical[3:], gripper_action=0.0)
 
     def neutral_action(self) -> Any:
+        """Return a zero action clipped into the environment's action spec."""
         import numpy as np
 
         target = getattr(self._env, "env", self._env)
@@ -315,18 +331,22 @@ class LiberoAdapter:
         return float(abs(values[0]) + abs(values[1]))
 
     def visual_model_data(self) -> Tuple[Any, Any]:
+        """Return the live MuJoCo (model, data) pair used for visual export."""
         return self._env.env.sim.model, self._env.env.sim.data
 
     def visual_geom_groups(self) -> Tuple[int, ...]:
+        """Return the geom groups visible to the upstream offscreen cameras."""
         # 直接复用上游相机的可见分组：LIBERO 的 group 0 是接触代理，不能与
         # group 1 外观同时画到 Web，否则机器人会重影、半透明物体会遮挡操作。
         mask = self._env.env.sim._render_context_offscreen.vopt.geomgroup
         return tuple(index for index, visible in enumerate(mask) if visible)
 
     def visual_source_for_body(self, body_id: int, object_source_ids: Iterable[str]) -> str | None:
+        """Map a MuJoCo body id to its registered public source id, if any."""
         return self._visual_sources.get(body_id)
 
     def scene_metadata(self) -> Dict[str, Any]:
+        """Return object and region metadata read from the native scene registry."""
         return scene_metadata(self._env.env)
 
     def joint_position_action(self, target: Dict[str, float], *, gripper_action: float) -> Any:
@@ -363,6 +383,7 @@ class LiberoAdapter:
         return action
 
     def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
+        """Advance one control period and cache the normalized observation."""
         observation, reward, done, info = self._env.step(action)
         self._last_info = _json_scalars(info)
         self._raw_observation = observation
@@ -370,6 +391,7 @@ class LiberoAdapter:
         return dict(self._last_observation), float(reward), bool(done), self._last_info
 
     def success(self) -> bool:
+        """Return the native task success flag of the environment."""
         return bool(self._env.check_success())
 
     def contact_state(self) -> Dict[str, Any]:
@@ -402,6 +424,7 @@ class LiberoAdapter:
         }
 
     def native_metrics(self) -> Dict[str, Any]:
+        """Return provenance (package, suite, task, BDDL) and last-step info."""
         return {
             "package": self._package_name,
             "version": self._version,
@@ -414,6 +437,7 @@ class LiberoAdapter:
         }
 
     def close(self) -> None:
+        """Release the underlying environment."""
         self._env.close()
 
 

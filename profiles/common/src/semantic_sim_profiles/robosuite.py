@@ -27,6 +27,12 @@ FRANKA_JOINT_NAMES = tuple("panda_joint" + str(index) for index in range(1, 8))
 
 
 class RobosuiteAdapter:
+    """Run a robosuite 1.5 Lift/Stack environment behind the profile adapter surface.
+
+    Uses a Panda robot with an absolute JOINT_POSITION controller and a GRIP
+    gripper, rendering offscreen with the requested cameras.
+    """
+
     def __init__(
         self,
         environment: str,
@@ -70,11 +76,13 @@ class RobosuiteAdapter:
 
     @property
     def language(self) -> str:
+        """Fixed natural-language instruction for the environment."""
         return {"Lift": "lift the cube", "Stack": "stack the red cube on the green cube"}[
             self._environment
         ]
 
     def reset(self, seed: int) -> Dict[str, Any]:
+        """Seed and reset the environment, returning the normalized observation."""
         seeder = getattr(self._env, "seed", None)
         if callable(seeder):
             seeder(seed)
@@ -82,6 +90,7 @@ class RobosuiteAdapter:
         return dict(self._last_observation)
 
     def neutral_action(self) -> Any:
+        """Return an action holding the current joints with a neutral gripper."""
         return self.joint_position_action(self.joint_positions(), gripper_action=0.0)
 
     def joint_positions(self) -> Dict[str, float]:
@@ -106,13 +115,16 @@ class RobosuiteAdapter:
         return float(abs(values[0]) + abs(values[1]))
 
     def visual_model_data(self) -> Tuple[Any, Any]:
+        """Return the live MuJoCo (model, data) pair used for visual export."""
         return self._env.sim.model, self._env.sim.data
 
     def visual_geom_groups(self) -> Tuple[int, ...]:
+        """Return the geom groups visible to the offscreen renderer."""
         mask = self._env.sim._render_context_offscreen.vopt.geomgroup
         return tuple(index for index, visible in enumerate(mask) if visible)
 
     def visual_source_for_body(self, body_id: int, object_source_ids: Iterable[str]) -> str | None:
+        """Map a MuJoCo body id to a public robot/object source id, if any."""
         return public_source_for_body(
             self._env.sim.model,
             body_id,
@@ -147,6 +159,7 @@ class RobosuiteAdapter:
         return action
 
     def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
+        """Advance one control period; accepts 4- and 5-tuple step results."""
         result = self._env.step(action)
         if len(result) == 5:
             observation, reward, terminated, truncated, info = result
@@ -158,6 +171,7 @@ class RobosuiteAdapter:
         return dict(self._last_observation), float(reward), bool(done), self._last_info
 
     def success(self) -> bool:
+        """Return the environment's native success flag (False if unsupported)."""
         checker = getattr(self._env, "_check_success", None)
         return bool(checker()) if checker is not None else False
 
@@ -173,6 +187,7 @@ class RobosuiteAdapter:
         }
 
     def native_metrics(self) -> Dict[str, Any]:
+        """Return robosuite version, environment and action-space information."""
         low, _ = self._env.action_spec
         return {
             "robosuite_version": self._version,
@@ -182,6 +197,7 @@ class RobosuiteAdapter:
         }
 
     def close(self) -> None:
+        """Release the underlying environment."""
         self._env.close()
 
 

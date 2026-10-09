@@ -30,6 +30,7 @@ def default_render_backend() -> str:
 
 @dataclass(frozen=True)
 class Settings:
+    """Immutable process configuration for the MuJoCo runtime service."""
     asset_root: Path
     host: str = "127.0.0.1"
     port: int = 8090
@@ -54,6 +55,11 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
+        """Build settings from MUJOCO_* and PLUGIN_MUJOCO_* environment variables.
+
+        Falls back to the current working directory as asset root and to
+        127.0.0.1:8090 as listen address; realtime scheduling defaults on.
+        """
         raw_root = os.getenv("MUJOCO_ASSET_ROOT", "").strip()
         asset_root = Path(raw_root).expanduser().resolve() if raw_root else Path.cwd()
         return cls(

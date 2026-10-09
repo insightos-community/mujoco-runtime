@@ -28,35 +28,62 @@ from semantic_sim_profiles.models import EpisodeReport, ProfileRunRequest
 
 
 class ProfileAdapter(Protocol):
+    """Structural contract a benchmark adapter must satisfy to run an episode."""
+
     @property
-    def language(self) -> str: ...
+    def language(self) -> str:
+        """Natural-language instruction of the current task, or an empty string."""
+        ...
 
-    def reset(self, seed: int) -> Dict[str, Any]: ...
+    def reset(self, seed: int) -> Dict[str, Any]:
+        """Reset the environment and return the initial observation."""
+        ...
 
-    def neutral_action(self) -> Any: ...
+    def neutral_action(self) -> Any:
+        """Return an action that keeps the robot in place."""
+        ...
 
-    def base_pose(self) -> Dict[str, Any]: ...
+    def base_pose(self) -> Dict[str, Any]:
+        """Return the robot root body pose in the world frame."""
+        ...
 
-    def gripper_opening(self) -> float: ...
+    def gripper_opening(self) -> float:
+        """Return the measured gripper opening in meters."""
+        ...
 
-    def visual_model_data(self) -> Tuple[Any, Any]: ...
+    def visual_model_data(self) -> Tuple[Any, Any]:
+        """Return the live MuJoCo (model, data) pair used for visual export."""
+        ...
 
-    def visual_geom_groups(self) -> Tuple[int, ...]: ...
+    def visual_geom_groups(self) -> Tuple[int, ...]:
+        """Return the geom groups visible to the offscreen renderer."""
+        ...
 
     def visual_source_for_body(
         self, body_id: int, object_source_ids: Iterable[str]
-    ) -> str | None: ...
+    ) -> str | None:
+        """Map a MuJoCo body id to a public robot/object source id, if any."""
+        ...
 
-    def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]: ...
+    def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
+        """Advance one control period, returning (observation, reward, done, info)."""
+        ...
 
-    def success(self) -> bool: ...
+    def success(self) -> bool:
+        """Return the environment's native task success flag."""
+        ...
 
-    def native_metrics(self) -> Dict[str, Any]: ...
+    def native_metrics(self) -> Dict[str, Any]:
+        """Return environment provenance and last-step info for evidence."""
+        ...
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Release the underlying environment."""
+        ...
 
 
 def utc_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -110,6 +137,7 @@ def run_episode(adapter: ProfileAdapter, request: ProfileRunRequest) -> EpisodeR
 
 
 def summarize_observation(observation: Dict[str, Any]) -> list:
+    """List key, shape and dtype for each observation field, sorted by key."""
     fields = []
     for key in sorted(observation):
         value = observation[key]

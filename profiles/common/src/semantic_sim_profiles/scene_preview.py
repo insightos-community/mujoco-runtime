@@ -1,3 +1,18 @@
+# Copyright 2026 InsightOS
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """安装期原生初态预览。独立进程运行，不创建在线实例或加载策略模型。"""
 from __future__ import annotations
 
@@ -36,6 +51,12 @@ def state_summary(env):
 
 
 def describe_difference(baseline, current):
+    """Describe object-pose and joint changes between two state summaries.
+
+    Reports translation changes of at least 1 mm, orientation changes of at
+    least 1 degree, and joint changes above per-unit thresholds; returns a
+    "no significant change" message when nothing exceeds them.
+    """
     changes = []
     for name, value in current["objects"].items():
         old = baseline["objects"].get(name)
@@ -65,6 +86,12 @@ def describe_difference(baseline, current):
 
 
 def prepare(request_path):
+    """Generate initial-state preview images and result.json for a request file.
+
+    The request JSON names the scene_key, the variant initial states and the
+    output directory. Results are written incrementally so an interrupted run
+    can be resumed; already-generated variants are reused from the cache.
+    """
     request = json.loads(Path(request_path).read_text())
     output = Path(request["output_dir"])
     output.mkdir(parents=True, exist_ok=True)

@@ -53,6 +53,7 @@ async def _run_in_thread(function: Any, *args: Any) -> Any:
 
 
 def configured_profile() -> str:
+    """Return the profile id from SEMANTIC_SIM_PROFILE, raising if unset or unknown."""
     profile_id = os.getenv("SEMANTIC_SIM_PROFILE", "").strip()
     if profile_id not in {"robosuite-1.5", "libero-robosuite-1.4"}:
         raise RuntimeError("SEMANTIC_SIM_PROFILE 必须为 robosuite-1.5 或 libero-robosuite-1.4")
@@ -60,6 +61,11 @@ def configured_profile() -> str:
 
 
 def create_app(service: Optional[ProfileRuntimeService] = None) -> FastAPI:
+    """Build the FastAPI app exposing the profile runtime HTTP and stream API.
+
+    Reuses an injected service (mainly for tests) or creates one from the
+    configured profile; the active scene is stopped on shutdown.
+    """
     service = service or ProfileRuntimeService(configured_profile())
 
     @asynccontextmanager
@@ -432,6 +438,11 @@ def _frame_headers(metadata: Dict[str, Any]) -> Dict[str, str]:
 
 
 def main() -> None:
+    """Entry point: serve the runtime API, or run offline scene preview.
+
+    With ``--prepare-scene REQUEST_JSON`` the process generates initial-state
+    previews and exits; otherwise it starts uvicorn on PLUGIN_MUJOCO_HOST/PORT.
+    """
     import sys
     if len(sys.argv) == 3 and sys.argv[1] == "--prepare-scene":
         from semantic_sim_profiles.scene_preview import prepare
