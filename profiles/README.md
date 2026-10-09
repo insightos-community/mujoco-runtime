@@ -1,30 +1,36 @@
-# MuJoCo 系隔离运行环境
+# Isolated runtimes for the MuJoCo family
 
-这里保存 robosuite、LIBERO 和 LIBERO-Pro 的独立运行配置。它们共享测试报告格式，
-但不会安装到原生 MuJoCo Runtime 的 Python 环境中。
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-## 环境边界
+This directory holds the standalone run configurations for robosuite, LIBERO,
+and LIBERO-Pro. They share the test report format, but they are not installed
+into the native MuJoCo Runtime's Python environment.
 
-- 原生 Runtime 使用产品需要的 MuJoCo 与 R1 Pro 资产。
-- robosuite 使用 Python 3.10、robosuite 1.5.2 和 MuJoCo 3.4.0。
-- LIBERO 使用 Python 3.8、robosuite 1.4.0 和 NumPy 1.22.4。
-- LIBERO-Pro 复用 LIBERO Runtime，只增加固定源码的 BDDL 扰动与对比报告。
+## Environment boundaries
 
-env.step() 和 action array 只存在于 profile 内部，不会暴露给 Agent、Robot Skill 或 Studio。
+- The native Runtime uses the MuJoCo and R1 Pro assets required by the product.
+- robosuite uses Python 3.10, robosuite 1.5.2, and MuJoCo 3.4.0.
+- LIBERO uses Python 3.8, robosuite 1.4.0, and NumPy 1.22.4.
+- LIBERO-Pro reuses the LIBERO Runtime, adding only pinned-source BDDL
+  perturbations and a comparison report.
 
-## 公共测试
+env.step() and action arrays exist only inside the profiles and are not
+exposed to the Agent, Robot Skill, or Studio.
+
+## Common tests
 
     make test-profiles
 
-公共测试只验证运行器、报告、PNG 证据和错误处理，不能替代真实环境 smoke。
+The common tests only verify the runner, reports, PNG evidence, and error
+handling; they cannot replace real-environment smoke tests.
 
 ## robosuite
 
-安装隔离环境：
+Install the isolated environment:
 
     uv sync --project profiles/robosuite --python 3.10 --frozen
 
-运行 Lift 和 Stack：
+Run Lift and Stack:
 
     MUJOCO_GL=egl uv run --project profiles/robosuite --frozen \
       semantic-sim-profile robosuite --environment Lift --seed 7 --steps 10 \
@@ -34,31 +40,34 @@ env.step() 和 action array 只存在于 profile 内部，不会暴露给 Agent�
       semantic-sim-profile robosuite --environment Stack --seed 7 --steps 10 \
       --output-dir .output/profiles/robosuite-stack
 
-没有 EGL 时可把 MUJOCO_GL 改为 osmesa。报告包含 Observation 字段、reward、success、
-RGB PNG 和 16 位 Depth PNG。中性控制 smoke 不代表任务已经完成。
+When EGL is unavailable, MUJOCO_GL can be changed to osmesa. The report
+includes Observation fields, reward, success, an RGB PNG, and a 16-bit Depth
+PNG. A neutral-control smoke run does not mean the task has been completed.
 
-## LIBERO 源码准备
+## LIBERO source preparation
 
-上游 LIBERO 的普通 wheel 在固定提交上不会包含 libero 源码，因此本项目不安装该空 wheel。
-请把 sources.lock.yaml 中的两个仓库检出到固定提交；运行时必须显式传入源码根目录。
+The upstream LIBERO regular wheel does not contain the libero source at the
+pinned commit, so this project does not install that empty wheel. Check out
+the two repositories in sources.lock.yaml at the pinned commits; the source
+root must be passed explicitly at runtime.
 
     git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git .output/sources/LIBERO
     git -C .output/sources/LIBERO checkout 8f1084e3132a39270c3a13ebe37270a43ece2a01
     git clone https://github.com/RLinf/LIBERO-PRO.git .output/sources/LIBERO-PRO
     git -C .output/sources/LIBERO-PRO checkout 0bcf73621c789ffd6ed8858467a89df9ca94fd6b
 
-安装 Python 3.8 隔离环境：
+Install the Python 3.8 isolated environment:
 
     uv sync --project profiles/libero --python 3.8 --frozen
 
-运行固定 LIBERO task/init-state：
+Run a pinned LIBERO task/init-state:
 
     MUJOCO_GL=egl uv run --project profiles/libero --frozen \
       semantic-sim-profile libero --libero-root .output/sources/LIBERO \
       --suite libero_spatial --task-id 0 --init-state-id 0 --seed 7 --steps 10 \
       --output-dir .output/profiles/libero
 
-运行 LIBERO-Pro 基础/扰动对比：
+Run the LIBERO-Pro base/perturbation comparison:
 
     MUJOCO_GL=egl uv run --project profiles/libero --frozen \
       semantic-sim-profile libero-pro \
@@ -69,21 +78,31 @@ RGB PNG 和 16 位 Depth PNG。中性控制 smoke 不代表任务已经完成。
       --suite libero_spatial --task-id 0 --init-state-id 0 --seed 7 --steps 10 \
       --output-dir .output/profiles/libero-pro
 
-`sources.lock.yaml` 是发布构建和固定基线测试的唯一上游版本来源；升级时更新该锁文件，
-构建工具校验实际源码提交，并把来源版本写入场景包。上面的 checkout 值展示当前基线。
-运行时代码不固定 commit，也不以 commit 相等判断兼容性：源码模式记录实际 Git HEAD，
-场景包模式记录包内 `source_revision`，无 Git 信息的源码归档保留为未知。
-兼容环境由 Runtime Profile 声明，加载时仍检查必要的接口和资产；换版本需重新验证。
-LIBERO 配置写入本次输出目录，不会修改用户主目录。
-LIBERO-Pro 的 Python 3.10 注解通过加载兼容层延迟解析，上游源码本身保持不变。
+`sources.lock.yaml` is the single source of upstream versions for release
+builds and pinned-baseline tests; when upgrading, update that lock file. The
+build tools verify the actual source commit and write the source version into
+the scene package. The checkout values above show the current baseline. The
+runtime code does not pin a commit, nor does it judge compatibility by commit
+equality: source mode records the actual Git HEAD, scene-package mode records
+the in-package `source_revision`, and source archives without Git information
+remain unknown. Compatible environments are declared by the Runtime Profile,
+and the necessary interfaces and assets are still checked at load time;
+switching versions requires re-verification. The LIBERO configuration is
+written into the current output directory and does not modify the user's home
+directory. LIBERO-Pro's Python 3.10 annotations are lazily resolved through a
+loading compatibility layer, leaving the upstream source itself unchanged.
 
-## 输出与判定
+## Outputs and verdicts
 
-- report.json：固定环境、seed、步数、语言目标、reward、success 和依赖版本。
-- comparison.json：LIBERO-Pro 基础与扰动结果及差异。
-- initial/final RGB PNG：验收画面。
-- initial/final Depth PNG：归一化的 16 位深度证据。
-- 运行错误时仍写 report.json，同时 CLI 返回非零退出码。
+- report.json: the pinned environment, seed, step count, language objective,
+  reward, success, and dependency versions.
+- comparison.json: the LIBERO-Pro base and perturbation results and their
+  differences.
+- initial/final RGB PNG: the acceptance frames.
+- initial/final Depth PNG: the normalized 16-bit depth evidence.
+- On runtime errors, report.json is still written and the CLI returns a
+  non-zero exit code.
 
-外部数据集不进入 Plugin 制品。Framework、Studio、Pilot、AbilityFramework 和
-Semantic Map 的产品接线由各自版本分支完成。
+External datasets do not enter the Plugin artifacts. Product wiring for the
+Framework, Studio, Pilot, AbilityFramework, and Semantic Map is done on their
+respective release branches.

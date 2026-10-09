@@ -1,7 +1,11 @@
-# v0.4 公共接口样例
+# v0.4 public interface samples
 
-这些 JSON 由 Plugin、Framework、Robot SDK 和 Studio 的接口测试共同读取。
-`available: false` 是环境探测结果，不表示 Profile 已经通过运行验收。
-Robot 命令只包含轨迹和夹爪目标；stop、hold 使用明确端点。
-`scene-evaluation.json` 是 robosuite、LIBERO 等原生 evaluator 的运行证据样例，
-不能当作 Workflow、Robot Skill 或 Ability 的业务结果。
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+These JSON files are read jointly by the interface tests of the Plugin,
+Framework, Robot SDK, and Studio. `available: false` is the result of
+environment probing and does not mean the Profile has passed runtime
+acceptance. Robot commands contain only trajectory and gripper targets; stop
+and hold use explicit endpoints. `scene-evaluation.json` is a sample of
+runtime evidence from native evaluators such as robosuite and LIBERO; it must
+not be treated as a business result of a Workflow, Robot Skill, or Ability.
